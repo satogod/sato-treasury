@@ -100,6 +100,72 @@ function Confirm({open,onClose,onConfirm,message}){
   )
 }
 
+// ── Account search-select (replaces <select> for accounts) ───────────────────
+function AccSearch({label, accounts, value, onChange}){
+  const [q,setQ]     = useState('')
+  const [open,setOpen] = useState(false)
+  const selected     = accounts.find(a=>a.id===value)
+  const filtered     = useMemo(()=>{
+    const lower = q.toLowerCase()
+    return accounts.filter(a=>
+      a.name.toLowerCase().includes(lower) ||
+      (a.titular||'').toLowerCase().includes(lower) ||
+      a.currency.toLowerCase().includes(lower) ||
+      a.type.toLowerCase().includes(lower)
+    ).slice(0,12)
+  },[accounts,q])
+
+  return (
+    <Fld label={label}>
+      <div style={{position:'relative'}}>
+        <div
+          onClick={()=>setOpen(o=>!o)}
+          style={{background:'#fff',border:'1.5px solid #e0e0da',borderRadius:10,padding:'8px 12px',fontSize:13,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',userSelect:'none'}}
+        >
+          <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+            {selected?`${selected.name} (${selected.currency})`:'Seleccionar cuenta...'}
+          </span>
+          <span style={{fontSize:10,color:'#aaa',marginLeft:6}}>{open?'▲':'▼'}</span>
+        </div>
+        {open&&(
+          <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:'#fff',border:'1.5px solid #e0e0da',borderRadius:10,zIndex:50,boxShadow:'0 8px 24px rgba(0,0,0,0.12)',overflow:'hidden'}}>
+            <div style={{padding:'6px 8px',borderBottom:'1px solid #f0f0ea'}}>
+              <input
+                autoFocus
+                placeholder="Buscar cuenta..."
+                value={q}
+                onChange={e=>setQ(e.target.value)}
+                onClick={e=>e.stopPropagation()}
+                style={{width:'100%',border:'none',outline:'none',fontSize:13,background:'transparent'}}
+              />
+            </div>
+            <div style={{maxHeight:200,overflowY:'auto'}}>
+              {filtered.length===0
+                ?<div style={{padding:'10px 12px',fontSize:12,color:'#aaa'}}>Sin resultados</div>
+                :filtered.map(a=>(
+                  <div
+                    key={a.id}
+                    onClick={()=>{onChange(a.id);setOpen(false);setQ('')}}
+                    style={{padding:'8px 12px',cursor:'pointer',background:a.id===value?'#f0f0ea':'transparent',display:'flex',justifyContent:'space-between',alignItems:'center'}}
+                    onMouseEnter={e=>e.currentTarget.style.background='#f8f8f4'}
+                    onMouseLeave={e=>e.currentTarget.style.background=a.id===value?'#f0f0ea':'transparent'}
+                  >
+                    <div>
+                      <div style={{fontSize:13,fontWeight:a.id===value?600:400}}>{a.name}</div>
+                      <div style={{fontSize:10,color:'#aaa'}}>{a.type}{a.titular?' · '+a.titular:''}</div>
+                    </div>
+                    <Tag bg={ACC_COLOR[a.type]||'#f0f0ea'}>{a.currency}</Tag>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+        )}
+      </div>
+    </Fld>
+  )
+}
+
 // ── Op Form ───────────────────────────────────────────────────────────────────
 function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
   const mobile = useIsMobile()
@@ -183,11 +249,17 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
       {mode==='exchange'&&<>
         <div style={{background:'#fff5f5',border:'1.5px solid #fecaca',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#dc2626',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>📤 Sale de tu cuenta</div>
-          <G2 stack={mobile}><Sel label="Cuenta" value={f.fromAccId} onChange={e=>set('fromAccId',e.target.value)}>{accOpts}</Sel><Inp label={'Monto ('+(fromAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.fromAmt} onChange={e=>set('fromAmt',e.target.value)}/></G2>
+          <G2 stack={mobile}>
+            <AccSearch label="Cuenta" accounts={accounts} value={f.fromAccId} onChange={v=>set('fromAccId',v)}/>
+            <Inp label={'Monto ('+(fromAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.fromAmt} onChange={e=>set('fromAmt',e.target.value)}/>
+          </G2>
         </div>
         <div style={{background:'#f0fdf4',border:'1.5px solid #86efac',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#16a34a',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>📥 Entra a tu cuenta</div>
-          <G2 stack={mobile}><Sel label="Cuenta" value={f.toAccId} onChange={e=>set('toAccId',e.target.value)}>{accOpts}</Sel><Inp label={'Monto ('+(toAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/></G2>
+          <G2 stack={mobile}>
+            <AccSearch label="Cuenta" accounts={accounts} value={f.toAccId} onChange={v=>set('toAccId',v)}/>
+            <Inp label={'Monto ('+(toAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/>
+          </G2>
         </div>
         <Sel label="Cliente contraparte (opcional)" value={f.clientId} onChange={e=>set('clientId',e.target.value)}><option value="">— Sin cliente —</option>{cliOpts}</Sel>
       </>}
@@ -195,7 +267,10 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
       {mode==='credit_out'&&<>
         <div style={{background:'#fff5f5',border:'1.5px solid #fecaca',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#dc2626',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>📤 Lo que enviás</div>
-          <G2 stack={mobile}><Sel label="Tu cuenta" value={f.fromAccId} onChange={e=>set('fromAccId',e.target.value)}>{accOpts}</Sel><Inp label={'Monto ('+(fromAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.fromAmt} onChange={e=>set('fromAmt',e.target.value)}/></G2>
+          <G2 stack={mobile}>
+            <AccSearch label="Tu cuenta" accounts={accounts} value={f.fromAccId} onChange={v=>set('fromAccId',v)}/>
+            <Inp label={'Monto ('+(fromAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.fromAmt} onChange={e=>set('fromAmt',e.target.value)}/>
+          </G2>
         </div>
         <div style={{background:'#fffbeb',border:'1.5px solid #fcd34d',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#b45309',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>💳 Lo que te queda debiendo</div>
@@ -219,15 +294,26 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
         </div>
         <div style={{background:'#f0fdf4',border:'1.5px solid #86efac',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#16a34a',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>📥 Entra a tu cuenta</div>
-          <G2 stack={mobile}><Sel label="Cuenta" value={f.toAccId} onChange={e=>set('toAccId',e.target.value)}>{accOpts}</Sel><Inp label={'Monto ('+(toAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/></G2>
+          <G2 stack={mobile}>
+            <AccSearch label="Cuenta" accounts={accounts} value={f.toAccId} onChange={v=>set('toAccId',v)}/>
+            <Inp label={'Monto ('+(toAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/>
+          </G2>
         </div>
       </>}
 
       {mode==='transfer'&&(
         <div style={{background:'#f5f3ff',border:'1.5px solid #c4b5fd',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#7c3aed',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>↔ Entre tus cuentas</div>
-          <G2 stack={mobile}><Sel label="Origen" value={f.fromAccId} onChange={e=>set('fromAccId',e.target.value)}>{accOpts}</Sel><Sel label="Destino" value={f.toAccId} onChange={e=>set('toAccId',e.target.value)}>{accOpts}</Sel></G2>
-          <div style={{marginTop:8}}><G2 stack={mobile}><Inp label={'Sale ('+(fromAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.fromAmt} onChange={e=>set('fromAmt',e.target.value)}/><Inp label={'Entra ('+(toAcc?.currency||'—')+')'} type="number" placeholder="igual si misma moneda" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/></G2></div>
+          <G2 stack={mobile}>
+            <AccSearch label="Origen" accounts={accounts} value={f.fromAccId} onChange={v=>set('fromAccId',v)}/>
+            <AccSearch label="Destino" accounts={accounts} value={f.toAccId} onChange={v=>set('toAccId',v)}/>
+          </G2>
+          <div style={{marginTop:8}}>
+            <G2 stack={mobile}>
+              <Inp label={'Sale ('+(fromAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.fromAmt} onChange={e=>set('fromAmt',e.target.value)}/>
+              <Inp label={'Entra ('+(toAcc?.currency||'—')+')'} type="number" placeholder="igual si misma moneda" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/>
+            </G2>
+          </div>
         </div>
       )}
 
@@ -714,6 +800,10 @@ function Cuentas({accounts,ops,onAddAccount,onEditAccount,onDeleteAccount,onUpda
   const [confirmId,setConfirmId]=useState(null)
   const [f,sf]=useState({name:'',type:'Efectivo',currency:'USD',titular:'',openingBal:0})
 
+  const titulares = useMemo(()=>[...new Set(accounts.map(a=>a.titular).filter(Boolean))].sort(),[accounts])
+  const [filterTitular,setFilterTitular] = useState('todos')
+  const visibleAccounts = filterTitular==='todos' ? accounts : accounts.filter(a=>a.titular===filterTitular)
+
   const openNew = () => { setEditAcc(null); sf({name:'',type:'Efectivo',currency:'USD',titular:'',openingBal:0}); setOpen(true) }
   const openEdit = (acc,e) => { e.stopPropagation(); setEditAcc(acc); sf({name:acc.name,type:acc.type,currency:acc.currency,titular:acc.titular||'',openingBal:acc.opening_bal||0}); setOpen(true) }
   const submit = () => {
@@ -750,8 +840,19 @@ function Cuentas({accounts,ops,onAddAccount,onEditAccount,onDeleteAccount,onUpda
       </Modal>
       <Confirm open={!!confirmId} onClose={()=>setConfirmId(null)} onConfirm={()=>onDeleteAccount(confirmId)} message="Se eliminará la cuenta. Los movimientos históricos se mantendrán pero el saldo ya no se calculará."/>
 
+      {/* Titular filter */}
+      {titulares.length>1&&(
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {['todos',...titulares].map(t=>(
+            <button key={t} onClick={()=>setFilterTitular(t)} style={{background:filterTitular===t?'#0f0f0f':'#f0f0ea',color:filterTitular===t?'#fff':'#555',border:'none',borderRadius:20,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:filterTitular===t?700:400,fontFamily:"'Syne',sans-serif"}}>
+              {t==='todos'?'Todos':t}
+            </button>
+          ))}
+        </div>
+      )}
+
       {ACC_TYPES.map(type=>{
-        const accs=accounts.filter(a=>a.type===type)
+        const accs=visibleAccounts.filter(a=>a.type===type)
         if(!accs.length) return null
         return (
           <div key={type}>
@@ -909,6 +1010,41 @@ function Reportes({accounts,clients,ops,credits}){
           }
         </Card>
       </div>
+
+      {/* Saldo por titular */}
+      {(()=>{
+        const titulares = [...new Set(accounts.map(a=>a.titular).filter(Boolean))].sort()
+        if(titulares.length===0) return null
+        const byTitular = titulares.map(tit=>{
+          const accs = accounts.filter(a=>a.titular===tit)
+          const byCur = {}
+          accs.forEach(a=>{ byCur[a.currency]=(byCur[a.currency]||0)+accBal(a) })
+          const totalUSD = Object.entries(byCur).reduce((s,[cur,v])=>s+toUSD(v,cur),0)
+          return {tit, byCur, totalUSD}
+        })
+        return (
+          <Card>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:14}}>Saldo por titular</div>
+            <div style={{display:'grid',gridTemplateColumns:mobile?'1fr':'repeat(auto-fill,minmax(200px,1fr))',gap:10}}>
+              {byTitular.map(({tit,byCur,totalUSD})=>(
+                <div key={tit} style={{background:'#f8f8f4',borderRadius:10,padding:'12px 14px'}}>
+                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,marginBottom:8}}>{tit}</div>
+                  {Object.entries(byCur).map(([cur,val])=>(
+                    <div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'2px 0'}}>
+                      <span style={{fontSize:11,color:'#888'}}>{cur}</span>
+                      <span style={{fontSize:12,fontWeight:600,color:val<0?'#dc2626':'#0f0f0f'}}>{fmt(val,cur)}</span>
+                    </div>
+                  ))}
+                  <div style={{borderTop:'1px solid #e8e8e2',marginTop:6,paddingTop:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <span style={{fontSize:10,color:'#888',textTransform:'uppercase',fontWeight:700}}>Total USD</span>
+                    <span style={{fontSize:13,fontWeight:800,fontFamily:"'Syne',sans-serif",color:totalUSD<0?'#dc2626':'#0f0f0f'}}>{fmt(totalUSD,'USD')}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )
+      })()}
     </div>
   )
 }
