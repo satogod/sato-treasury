@@ -300,10 +300,24 @@ function Dashboard({accounts,clients,ops,credits,setTab}){
     <div style={{display:'grid',gridTemplateColumns:cols,gap:14}}>
       <Card>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Saldos por tipo</div>
-        {ACC_TYPES.map(type=>{const ent=Object.entries(accSumm[type]||{}).filter(([,v])=>v!==0);return<div key={type} style={{marginBottom:10}}>
-          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}><div style={{width:7,height:7,borderRadius:'50%',background:ACC_COLOR[type]||'#ccc'}}/><span style={{fontSize:10,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:'0.05em'}}>{type}</span></div>
-          {ent.length===0?<div style={{fontSize:11,color:'#ccc',paddingLeft:13}}>$0</div>:ent.map(([cur,val])=><div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'1px 0 1px 10px',borderLeft:'2px solid '+(ACC_COLOR[type]||'#eee')}}><span style={{fontSize:12,color:'#888'}}>{cur}</span><span style={{fontSize:13,fontWeight:700,color:val<0?'#dc2626':'#0f0f0f'}}>{fmt(val,cur)}</span></div>)}
-        </div>)}
+        {ACC_TYPES.map(type=>{
+          const ent=Object.entries(accSumm[type]||{}).filter(([,v])=>v!==0)
+          return <div key={type} style={{marginBottom:10}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+              <div style={{width:7,height:7,borderRadius:'50%',background:ACC_COLOR[type]||'#ccc'}}/>
+              <span style={{fontSize:10,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:'0.05em'}}>{type}</span>
+            </div>
+            {ent.length===0
+              ? <div style={{fontSize:11,color:'#ccc',paddingLeft:13}}>$0</div>
+              : ent.map(([cur,val])=>(
+                <div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'1px 0 1px 10px',borderLeft:'2px solid '+(ACC_COLOR[type]||'#eee')}}>
+                  <span style={{fontSize:12,color:'#888'}}>{cur}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:val<0?'#dc2626':'#0f0f0f'}}>{fmt(val,cur)}</span>
+                </div>
+              ))
+            }
+          </div>
+        })}
       </Card>
       <Card>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Créditos abiertos</div>
@@ -518,7 +532,27 @@ function Reportes({accounts,clients,ops,credits}){
       <Card><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Profit por cliente</div>{pByCli.length===0?<div style={{fontSize:12,color:'#ccc'}}>Sin datos</div>:pByCli.map(({name,profit:p,ops:n})=><div key={name} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid #f0f0ea'}}><div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}><div style={{width:20,height:20,borderRadius:'50%',background:cliColor(name),display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:800,flexShrink:0}}>{name.slice(0,2)}</div><div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</div><div style={{fontSize:10,color:'#aaa'}}>{n} ops</div></div></div><span style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:13,color:p>=0?'#16a34a':'#dc2626',flexShrink:0,marginLeft:8}}>{(p>=0?'+':'')+fmt(p,'USD')}</span></div>)}</Card>
     </div>
     <div style={{display:'grid',gridTemplateColumns:cols,gap:14}}>
-      <Card><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Saldos actuales</div>{ACC_TYPES.map(type=>{const ent=Object.entries(accS[type]||{});return<div key={type} style={{marginBottom:10}}><div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}><div style={{width:7,height:7,borderRadius:'50%',background:ACC_COLOR[type]||'#ccc'}}/><span style={{fontSize:10,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:'0.05em'}}>{type}</span></div>{ent.length===0?<div style={{fontSize:11,color:'#ccc',paddingLeft:12}}>$0</div>:ent.map(([cur,val])=><div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'1px 0 1px 9px',borderLeft:'2px solid '+(ACC_COLOR[type]||'#eee')}}><span style={{fontSize:12,color:'#888'}}>{cur}</span><span style={{fontSize:12,fontWeight:700,color:val<0?'#dc2626':'#0f0f0f'}}>{fmt(val,cur)}</span></div>)}</div>})}</Card>
+      <Card>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Saldos actuales</div>
+        {ACC_TYPES.map(type=>{
+          const ent=Object.entries(accS[type]||{})
+          return <div key={type} style={{marginBottom:10}}>
+            <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
+              <div style={{width:7,height:7,borderRadius:'50%',background:ACC_COLOR[type]||'#ccc'}}/>
+              <span style={{fontSize:10,fontWeight:700,color:'#888',textTransform:'uppercase',letterSpacing:'0.05em'}}>{type}</span>
+            </div>
+            {ent.length===0
+              ? <div style={{fontSize:11,color:'#ccc',paddingLeft:12}}>$0</div>
+              : ent.map(([cur,val])=>(
+                <div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'1px 0 1px 9px',borderLeft:'2px solid '+(ACC_COLOR[type]||'#eee')}}>
+                  <span style={{fontSize:12,color:'#888'}}>{cur}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:val<0?'#dc2626':'#0f0f0f'}}>{fmt(val,cur)}</span>
+                </div>
+              ))
+            }
+          </div>
+        })}
+      </Card>
       <Card><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Créditos abiertos</div>{Object.keys(allCr).length===0?<div style={{textAlign:'center',padding:'12px 0'}}><div style={{fontSize:22}}>✓</div><div style={{fontSize:12,color:'#888',marginTop:3}}>Sin créditos</div></div>:Object.entries(allCr).map(([cur,v])=><div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid #f0f0ea'}}><Tag bg="#fef9c3" color="#b45309">{cur}</Tag><span style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:14,color:'#b45309'}}>{fmt(v,cur)}</span></div>)}</Card>
     </div>
   </div>
