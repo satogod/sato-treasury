@@ -175,3 +175,25 @@ create view client_credit_balances as
   join operation_legs ol on ol.client_id = c.id and ol.kind = 'credit'
   group by c.id, c.name, ol.currency
   having sum(ol.delta) != 0;
+
+-- ============================================================
+-- PATCH: Políticas para UPDATE y DELETE (ejecutar si no existen)
+-- ============================================================
+
+-- Accounts
+create policy "operator_update_accounts" on accounts
+  for update using (exists (select 1 from profiles where id = auth.uid() and role in ('admin','operator')));
+create policy "operator_delete_accounts" on accounts
+  for delete using (exists (select 1 from profiles where id = auth.uid() and role in ('admin','operator')));
+
+-- Clients
+create policy "operator_update_clients" on clients
+  for update using (exists (select 1 from profiles where id = auth.uid() and role in ('admin','operator')));
+create policy "operator_delete_clients" on clients
+  for delete using (exists (select 1 from profiles where id = auth.uid() and role in ('admin','operator')));
+
+-- Operations
+create policy "operator_delete_ops" on operations
+  for delete using (exists (select 1 from profiles where id = auth.uid() and role in ('admin','operator')));
+create policy "operator_delete_legs" on operation_legs
+  for delete using (exists (select 1 from profiles where id = auth.uid() and role in ('admin','operator')));
