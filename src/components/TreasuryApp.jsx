@@ -91,9 +91,9 @@ const Sel = ({label,children,...p}) => (
 const G2 = ({children,gap,stack}) => (
   <div style={{display:'grid',gridTemplateColumns:stack?'1fr':'1fr 1fr',gap:gap||12}}>{children}</div>
 )
-const Divider = () => <div style={{borderTop:,margin:'4px 0'}}/>
-const TH_S = {padding:'10px 14px',textAlign:'left',fontWeight:600,fontSize:11,color:T.textSub,background:T.bgApp,textTransform:'uppercase',letterSpacing:'0.04em',whiteSpace:'nowrap',borderBottom:}
-const TD_S = {padding:'11px 14px',borderBottom:,fontSize:13,verticalAlign:'middle',color:T.text}
+const Divider = () => <div style={{borderTop:'1px solid '+T.border,margin:'4px 0'}}/>
+const TH_S = {padding:'10px 14px',textAlign:'left',fontWeight:600,fontSize:11,color:T.textSub,background:T.bgApp,textTransform:'uppercase',letterSpacing:'0.04em',whiteSpace:'nowrap',borderBottom:'1px solid '+T.border}
+const TD_S = {padding:'11px 14px',borderBottom:'1px solid '+T.bgApp,fontSize:13,verticalAlign:'middle',color:T.text}
 
 // ── Modal — slides up from center, not bottom ─────────────────────────────────
 function Modal({open,onClose,title,children,wide}){
