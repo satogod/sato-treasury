@@ -74,7 +74,7 @@ const Card = ({children,style,onClick}) => (
   <div onClick={onClick} style={{background:T.bgCard,border:'1px solid '+T.border,borderRadius:8,padding:'16px 20px',cursor:onClick?'pointer':undefined,...style}}>{children}</div>
 )
 const Btn = ({children,onClick,primary,small,disabled,danger,ghost,style}) => (
-  <button onClick={onClick} disabled={disabled} style={{background:danger?T.redBg:primary?T.accent:ghost?'transparent':'#fff',color:danger?T.red:primary?'#fff':ghost?T.textSub:T.text,border:danger?'1px solid '+T.redBorder:primary?'none':ghost?'none':'1px solid '+T.border,,borderRadius:6,padding:small?'4px 10px':'6px 14px',fontWeight:500,fontSize:small?11:13,fontFamily:"'DM Sans',sans-serif",cursor:disabled?'not-allowed':'pointer',opacity:disabled?.5:1,whiteSpace:'nowrap',letterSpacing:'-0.01em',...style}}>{children}</button>
+  <button onClick={onClick} disabled={disabled} style={{background:danger?T.redBg:primary?T.accent:ghost?'transparent':'#fff',color:danger?T.red:primary?'#fff':ghost?T.textSub:T.text,border:danger?'1px solid '+T.redBorder:primary?'none':ghost?'none':'1px solid '+T.border,borderRadius:6,padding:small?'4px 10px':'6px 14px',fontWeight:500,fontSize:small?11:13,fontFamily:"'DM Sans',sans-serif",cursor:disabled?'not-allowed':'pointer',opacity:disabled?.5:1,whiteSpace:'nowrap',letterSpacing:'-0.01em',...style}}>{children}</button>
 )
 const Tag = ({children,bg,color,size}) => (
   <span style={{display:'inline-flex',alignItems:'center',padding:size==='sm'?'1px 6px':'2px 8px',borderRadius:20,fontSize:size==='sm'?10:11,fontWeight:600,background:bg||T.bgApp,color:color||T.textSub,border:'1px solid '+T.border,whiteSpace:'nowrap'}}>{children}</span>
