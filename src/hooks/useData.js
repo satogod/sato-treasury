@@ -88,6 +88,7 @@ function normalizeOp(op) {
     rate: op.rate,
     profit: op.profit,
     isReversal: op.is_reversal,
+    attachments: op.attachments || [],
     legs: (op.legs || []).map(l => ({
       id: l.id, kind: l.kind,
       accId: l.account_id, clientId: l.client_id,
@@ -105,37 +106,79 @@ export async function addOperation(op) {
       client_id: op.clientId || null, client_name: op.clientName || null,
       rate: op.rate || null, profit: op.profit || null,
       is_reversal: op.isReversal || false,
+      attachments: op.attachments || [],
     })
     .select('id').single()
   if (opErr) throw opErr
-  const legs = op.legs.map(l => ({
-    operation_id: inserted.id, kind: l.kind,
-    account_id: l.kind === 'account' ? l.accId : null,
-    client_id: l.kind === 'credit' ? l.clientId : null,
-    client_name: l.kind === 'credit' ? l.clientName : null,
-    currency: l.cur, delta: l.delta,
-  }))
-  const { error: legErr } = await supabase.from('operation_legs').insert(legs)
-  if (legErr) throw legErr
-}
-
-export async function editOperation(op, originalOp) {
-  const reversal = {
-    ...originalOp, id: undefined,
-    createdAt: new Date().toISOString(),
-    detail: '[CORRECCIÓN] ' + originalOp.detail,
-    isReversal: true,
-    profit: originalOp.profit ? -originalOp.profit : 0,
-    legs: originalOp.legs.map(l => ({ ...l, id: undefined, delta: -l.delta })),
+  if (op.legs && op.legs.length > 0) {
+    const legs = op.legs.map(l => ({
+      operation_id: inserted.id, kind: l.kind,
+      account_id: l.kind === 'account' ? l.accId : null,
+      client_id: l.kind === 'credit' ? l.clientId : null,
+      client_name: l.kind === 'credit' ? l.clientName : null,
+      currency: l.cur, delta: l.delta,
+    }))
+    const { error: legErr } = await supabase.from('operation_legs').insert(legs)
+    if (legErr) throw legErr
   }
-  await addOperation(reversal)
-  await addOperation({ ...op, id: undefined })
+  return inserted.id
 }
 
-// Hard delete an operation + reversal pair
+// Edit = update in place: delete old legs, insert new ones, update op fields
+export async function editOperation(op, originalOp) {
+  // 1. Delete existing legs for this operation
+  const { error: delErr } = await supabase
+    .from('operation_legs').delete().eq('operation_id', originalOp.id)
+  if (delErr) throw delErr
+
+  // 2. Update the operation record itself
+  const { error: upErr } = await supabase
+    .from('operations')
+    .update({
+      created_at: op.createdAt,
+      detail: op.detail,
+      mode: op.mode,
+      client_id: op.clientId || null,
+      client_name: op.clientName || null,
+      rate: op.rate || null,
+      profit: op.profit || null,
+      attachments: op.attachments || [],
+    })
+    .eq('id', originalOp.id)
+  if (upErr) throw upErr
+
+  // 3. Insert new legs
+  if (op.legs && op.legs.length > 0) {
+    const legs = op.legs.map(l => ({
+      operation_id: originalOp.id, kind: l.kind,
+      account_id: l.kind === 'account' ? l.accId : null,
+      client_id: l.kind === 'credit' ? l.clientId : null,
+      client_name: l.kind === 'credit' ? l.clientName : null,
+      currency: l.cur, delta: l.delta,
+    }))
+    const { error: legErr } = await supabase.from('operation_legs').insert(legs)
+    if (legErr) throw legErr
+  }
+}
+
 export async function deleteOperation(opId) {
+  // legs cascade on delete via FK
   const { error } = await supabase.from('operations').delete().eq('id', opId)
   if (error) throw error
+}
+
+// ── Upload attachment ─────────────────────────────────────────────────────────
+export async function uploadAttachment(file, opId) {
+  const ext  = file.name.split('.').pop()
+  const path = `${opId}/${Date.now()}.${ext}`
+  const { error } = await supabase.storage.from('comprobantes').upload(path, file)
+  if (error) throw error
+  return path
+}
+
+export async function getAttachmentUrl(path) {
+  const { data } = await supabase.storage.from('comprobantes').createSignedUrl(path, 3600)
+  return data?.signedUrl
 }
 
 // ── Credit balances view ──────────────────────────────────────────────────────

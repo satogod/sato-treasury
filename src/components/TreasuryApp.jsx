@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import {
   useAccounts, useClients, useOperations, useCreditBalances,
   addOperation, editOperation, deleteOperation,
+  uploadAttachment, getAttachmentUrl,
   addClient, updateClient, deleteClient,
   addAccount, updateAccount, deleteAccount, updateAccountOpeningBal,
 } from '../hooks/useData'
@@ -25,9 +26,22 @@ const FMT = {
   EUR:  v=>'€'+Math.abs(v).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}),
 }
 const fmt   = (v,c) => { if(v==null||isNaN(v)) return '—'; const fn=FMT[c]||(x=>Math.abs(x).toFixed(2)+' '+c); return (v<0?'-':'')+fn(v) }
-const fmtD  = iso => new Date(iso).toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'2-digit'})
-const fmtDT = iso => new Date(iso).toLocaleString('es-PY',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
 const uid   = () => Math.random().toString(36).slice(2,9)
+
+// ── Timezone UTC-3 helper ────────────────────────────────────────────────────
+const nowUTC3 = () => {
+  const d = new Date()
+  d.setHours(d.getHours() - 3)  // UTC-3
+  return d.toISOString().slice(0,16)
+}
+const toUTC3Display = (iso) => {
+  const d = new Date(iso)
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset() - 180) // UTC-3
+  return d
+}
+const fmtD  = iso => toUTC3Display(iso).toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'2-digit'})
+const fmtDT = iso => toUTC3Display(iso).toLocaleString('es-PY',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+
 
 // ── Balance helpers ───────────────────────────────────────────────────────────
 const accBal       = acc => Number(acc.balance||0)
@@ -357,10 +371,11 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
       }
     }
     return {
-      date: new Date().toISOString().slice(0,16),
+      date: nowUTC3(),
       clientId: clients[0]?.id||'',
       detail: '',
       rate: '',
+      files: [],
       outs: [mkOut()],
       ins:  [mkIn()],
     }
@@ -400,7 +415,7 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
     return +(totalInUSD-totalOutUSD).toFixed(2)
   },[totalOutUSD,totalInUSD,mode])
 
-  const submit = () => {
+  const submit = async () => {
     const legs = []
     for(const o of s.outs){
       const amt=parseFloat(o.amt)||0
@@ -426,12 +441,23 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
       }
     }
     if(!legs.length){alert('Agregá al menos un movimiento');return}
+    const opId = editOp?editOp.id:uid()
+    // Upload new files
+    let attachments = editOp?.attachments||[]
+    if(s.files&&s.files.length>0){
+      for(const file of s.files){
+        try{
+          const path = await uploadAttachment(file, opId)
+          attachments = [...attachments, {path, name:file.name, size:file.size}]
+        }catch(e){ console.warn('Upload failed:',e.message) }
+      }
+    }
     onSubmit({
-      id:editOp?editOp.id:uid(),
+      id:opId,
       createdAt:new Date(s.date).toISOString(),
       detail:s.detail, mode,
       clientId:s.clientId||null, clientName:clients.find(c=>c.id===s.clientId)?.name||null,
-      rate:parseFloat(s.rate)||null, profit:autoProfit, legs
+      rate:parseFloat(s.rate)||null, profit:autoProfit, legs, attachments
     },editOp)
     onClose()
   }
@@ -576,6 +602,36 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
 
       <Inp label="Cotización de referencia (opcional)" type="number" placeholder="ej: 6200" value={s.rate} onChange={e=>set('rate',e.target.value)}/>
       <Inp label="Detalle / Comentario" placeholder="Descripción de la operación" value={s.detail} onChange={e=>set('detail',e.target.value)}/>
+
+      {/* Attachment upload */}
+      <Fld label="Comprobantes (opcional)">
+        <div style={{border:'1px dashed '+T.border,borderRadius:8,padding:'10px 12px',background:T.bgApp}}>
+          <input
+            type="file" multiple accept="image/*,.pdf,.jpg,.jpeg,.png,.webp"
+            onChange={e=>set('files',Array.from(e.target.files))}
+            style={{fontSize:12,color:T.textSub,width:'100%'}}
+          />
+          {s.files&&s.files.length>0&&(
+            <div style={{marginTop:6,display:'flex',flexWrap:'wrap',gap:4}}>
+              {s.files.map((f,i)=>(
+                <Tag key={i} bg={T.blueBg} color={T.blue} size="sm">📎 {f.name.slice(0,20)}{f.name.length>20?'…':''}</Tag>
+              ))}
+            </div>
+          )}
+          {/* Show existing attachments when editing */}
+          {editOp?.attachments?.length>0&&(
+            <div style={{marginTop:6}}>
+              <div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Archivos existentes:</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                {editOp.attachments.map((a,i)=>(
+                  <Tag key={i} bg={T.greenBg} color={T.green} size="sm">✓ {a.name||'archivo '+(i+1)}</Tag>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </Fld>
+
       <div style={{fontSize:10,color:T.textMuted,textAlign:'center'}}>Ref: 1 USDT=$1 · 1 EUR=$1.08 · ₲6200=$1 · R$5.1=$1</div>
       <div style={{display:'flex',gap:8,justifyContent:'flex-end',paddingTop:4}}>
         <Btn onClick={onClose}>Cancelar</Btn>
@@ -945,7 +1001,10 @@ function Operaciones({accounts,clients,credits,ops,onAddOp,onEditOp,onDeleteOp,o
                           {inA.map(l=><div key={l.id}><div style={{color:T.green,fontWeight:700}}>+{fmt(l.delta,l.cur)}</div><div style={{fontSize:10,color:T.textMuted}}>{accMap[l.accId]?.name||'—'}</div></div>)}
                           {inC.map(l=><div key={l.id}><div style={{color:'#b45309',fontWeight:700}}>💳 {fmt(l.delta,l.cur)}</div><div style={{fontSize:10,color:T.textMuted}}>Crédito: {l.clientName}</div></div>)}
                         </td>
-                        <td style={TD_S}>{op.profit!=null?<Tag bg={op.profit>=0?'#dcfce7':'#fee2e2'} color={op.profit>=0?'#166534':'#991b1b'}>{(op.profit>=0?'+':'')+fmt(op.profit,'USD')}</Tag>:'—'}</td>
+                        <td style={TD_S}>
+                          {op.profit!=null?<Tag bg={op.profit>=0?'#dcfce7':'#fee2e2'} color={op.profit>=0?'#166534':'#991b1b'}>{(op.profit>=0?'+':'')+fmt(op.profit,'USD')}</Tag>:'—'}
+                          {op.attachments?.length>0&&<div style={{marginTop:3}}><Tag bg={T.blueBg} color={T.blue} size="sm">📎 {op.attachments.length}</Tag></div>}
+                        </td>
                         <td style={TD_S}>
                           <div style={{display:'flex',gap:4}}>
                             <Btn small onClick={()=>{setEdit(op);setOpen(true)}}>✏</Btn>
@@ -1165,7 +1224,18 @@ function Cuentas({accounts,ops,onAddAccount,onEditAccount,onDeleteAccount,onUpda
 
   const titulares = useMemo(()=>[...new Set(accounts.map(a=>a.titular).filter(Boolean))].sort(),[accounts])
   const [filterTitular,setFilterTitular] = useState('todos')
-  const visibleAccounts = filterTitular==='todos' ? accounts : accounts.filter(a=>a.titular===filterTitular)
+  const [filterCur,setFilterCur]         = useState('todas')
+  const [searchAcc,setSearchAcc]         = useState('')
+
+  const allCurrencies = useMemo(()=>[...new Set(accounts.map(a=>a.currency))].sort(),[accounts])
+
+  const visibleAccounts = useMemo(()=>{
+    let list = accounts
+    if(filterTitular!=='todos') list=list.filter(a=>a.titular===filterTitular)
+    if(filterCur!=='todas')     list=list.filter(a=>a.currency===filterCur)
+    if(searchAcc.trim())        list=list.filter(a=>a.name.toLowerCase().includes(searchAcc.toLowerCase())||(a.titular||'').toLowerCase().includes(searchAcc.toLowerCase()))
+    return [...list].sort((a,b)=>a.name.localeCompare(b.name))
+  },[accounts,filterTitular,filterCur,searchAcc])
 
   const openNew = () => { setEditAcc(null); sf({name:'',type:'Efectivo',currency:'USD',titular:'',openingBal:0}); setOpen(true) }
   const openEdit = (acc,e) => { e.stopPropagation(); setEditAcc(acc); sf({name:acc.name,type:acc.type,currency:acc.currency,titular:acc.titular||'',openingBal:acc.opening_bal||0}); setOpen(true) }
@@ -1203,15 +1273,37 @@ function Cuentas({accounts,ops,onAddAccount,onEditAccount,onDeleteAccount,onUpda
       </Modal>
       <Confirm open={!!confirmId} onClose={()=>setConfirmId(null)} onConfirm={()=>onDeleteAccount(confirmId)} message="Se eliminará la cuenta. Los movimientos históricos se mantendrán pero el saldo ya no se calculará."/>
 
+      {/* Search bar */}
+      <input
+        placeholder="Buscar cuenta por nombre o titular..."
+        value={searchAcc} onChange={e=>setSearchAcc(e.target.value)}
+        style={{padding:'7px 10px',border:'1px solid '+T.border,borderRadius:6,fontSize:13,background:'#fff',color:T.text,outline:'none',width:'100%',boxSizing:'border-box'}}
+      />
+
+      {/* Currency filter */}
+      <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+        <span style={{fontSize:11,color:T.textMuted,fontWeight:600}}>Moneda:</span>
+        {['todas',...allCurrencies].map(c=>(
+          <button key={c} onClick={()=>setFilterCur(c)} style={{background:filterCur===c?T.text:'#fff',color:filterCur===c?'#fff':T.textSub,border:'1px solid '+T.border,borderRadius:20,padding:'3px 10px',cursor:'pointer',fontSize:11,fontWeight:filterCur===c?600:400}}>
+            {c==='todas'?'Todas':c}
+          </button>
+        ))}
+      </div>
+
       {/* Titular filter */}
       {titulares.length>1&&(
-        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+          <span style={{fontSize:11,color:T.textMuted,fontWeight:600}}>Titular:</span>
           {['todos',...titulares].map(t=>(
-            <button key={t} onClick={()=>setFilterTitular(t)} style={{background:filterTitular===t?'#0f0f0f':'#f0f0ea',color:filterTitular===t?'#fff':'#555',border:'none',borderRadius:20,padding:'4px 12px',cursor:'pointer',fontSize:12,fontWeight:filterTitular===t?700:400,fontFamily:"'Syne',sans-serif"}}>
+            <button key={t} onClick={()=>setFilterTitular(t)} style={{background:filterTitular===t?T.text:'#fff',color:filterTitular===t?'#fff':T.textSub,border:'1px solid '+T.border,borderRadius:20,padding:'3px 10px',cursor:'pointer',fontSize:11,fontWeight:filterTitular===t?600:400}}>
               {t==='todos'?'Todos':t}
             </button>
           ))}
         </div>
+      )}
+
+      {visibleAccounts.length===0&&(
+        <div style={{color:T.textMuted,fontSize:13,padding:'1rem 0',textAlign:'center'}}>No hay cuentas que coincidan con los filtros.</div>
       )}
 
       {ACC_TYPES.map(type=>{
