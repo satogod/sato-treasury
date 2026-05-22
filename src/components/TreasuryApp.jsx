@@ -167,8 +167,68 @@ function AccSearch({label, accounts, value, onChange}){
   )
 }
 
+// ── Client search-select with inline create ────────────────────────────────
+function ClientSearch({label, clients, value, onChange, onCreateClient, optional}){
+  const [q,setQ]       = useState('')
+  const [open,setOpen] = useState(false)
+  const [creating,setCreating] = useState(false)
+  const [newName,setNewName]   = useState('')
+  const selected = clients.find(c=>c.id===value)
+  const filtered = useMemo(()=>{
+    const lower=q.toLowerCase()
+    return clients.filter(c=>c.name.toLowerCase().includes(lower)).slice(0,10)
+  },[clients,q])
+
+  const doCreate = () => {
+    if(!newName.trim()) return
+    onCreateClient(newName.trim(), id => { onChange(id); setOpen(false); setQ(''); setCreating(false); setNewName('') })
+  }
+
+  return (
+    <Fld label={label}>
+      <div style={{position:'relative'}}>
+        <div onClick={()=>setOpen(o=>!o)} style={{background:'#fff',border:'1.5px solid #e0e0da',borderRadius:10,padding:'8px 12px',fontSize:13,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',userSelect:'none'}}>
+          <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:selected?'#0f0f0f':'#aaa'}}>
+            {selected?selected.name:(optional?'— Sin cliente —':'Seleccionar...')}
+          </span>
+          <span style={{fontSize:10,color:'#aaa',marginLeft:6}}>{open?'▲':'▼'}</span>
+        </div>
+        {open&&(
+          <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:'#fff',border:'1.5px solid #e0e0da',borderRadius:10,zIndex:50,boxShadow:'0 8px 24px rgba(0,0,0,0.12)',overflow:'hidden'}}>
+            <div style={{padding:'6px 8px',borderBottom:'1px solid #f0f0ea'}}>
+              <input autoFocus placeholder="Buscar..." value={q} onChange={e=>setQ(e.target.value)} onClick={e=>e.stopPropagation()} style={{width:'100%',border:'none',outline:'none',fontSize:13,background:'transparent'}}/>
+            </div>
+            <div style={{maxHeight:180,overflowY:'auto'}}>
+              {optional&&<div onClick={()=>{onChange('');setOpen(false);setQ('')}} style={{padding:'8px 12px',cursor:'pointer',fontSize:13,color:'#aaa',borderBottom:'1px solid #f5f5f4'}} onMouseEnter={e=>e.currentTarget.style.background='#f8f8f4'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>— Sin cliente —</div>}
+              {filtered.length===0&&!creating&&<div style={{padding:'8px 12px',fontSize:12,color:'#aaa'}}>Sin resultados</div>}
+              {filtered.map(c=>(
+                <div key={c.id} onClick={()=>{onChange(c.id);setOpen(false);setQ('')}} style={{padding:'8px 12px',cursor:'pointer',background:c.id===value?'#f0f0ea':'transparent',fontSize:13,fontWeight:c.id===value?600:400}} onMouseEnter={e=>e.currentTarget.style.background='#f8f8f4'} onMouseLeave={e=>e.currentTarget.style.background=c.id===value?'#f0f0ea':'transparent'}>
+                  {c.name}
+                </div>
+              ))}
+            </div>
+            {/* Create new */}
+            <div style={{borderTop:'1px solid #f0f0ea'}}>
+              {creating
+                ?<div style={{padding:'8px 10px',display:'flex',gap:6,alignItems:'center'}} onClick={e=>e.stopPropagation()}>
+                  <input autoFocus placeholder="Nombre del cliente..." value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doCreate()} style={{flex:1,border:'1.5px solid #e0e0da',borderRadius:8,padding:'5px 8px',fontSize:12,outline:'none'}}/>
+                  <button onClick={doCreate} style={{background:'#0f0f0f',color:'#fff',border:'none',borderRadius:8,padding:'5px 10px',cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:"'Syne',sans-serif",whiteSpace:'nowrap'}}>Crear</button>
+                  <button onClick={()=>{setCreating(false);setNewName('')}} style={{background:'none',border:'none',cursor:'pointer',color:'#aaa',fontSize:16,padding:'2px 4px'}}>×</button>
+                </div>
+                :<div onClick={e=>{e.stopPropagation();setCreating(true)}} style={{padding:'9px 12px',cursor:'pointer',fontSize:12,fontWeight:700,color:'#0f0f0f',display:'flex',alignItems:'center',gap:6}} onMouseEnter={e=>e.currentTarget.style.background='#f0f0ea'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                  <span style={{fontSize:16,lineHeight:1}}>+</span> Crear nuevo cliente
+                </div>
+              }
+            </div>
+          </div>
+        )}
+      </div>
+    </Fld>
+  )
+}
+
 // ── Op Form ───────────────────────────────────────────────────────────────────
-function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
+function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp}){
   const mobile = useIsMobile()
   const [mode,setMode] = useState(editOp?.mode||'exchange')
   const initF = () => {
@@ -281,7 +341,7 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
             <Inp label={'Monto ('+(toAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/>
           </G2>
         </div>
-        <Sel label="Cliente contraparte (opcional)" value={f.clientId} onChange={e=>set('clientId',e.target.value)}><option value="">— Sin cliente —</option>{cliOpts}</Sel>
+        <ClientSearch label="Cliente contraparte (opcional)" clients={clients} value={f.clientId} onChange={v=>set('clientId',v)} onCreateClient={onCreateClient} optional/>
       </>}
 
       {mode==='credit_out'&&<>
@@ -294,14 +354,14 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
         </div>
         <div style={{background:'#fffbeb',border:'1.5px solid #fcd34d',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#b45309',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>💳 Lo que te queda debiendo</div>
-          <Sel label="Cliente" value={f.clientId} onChange={e=>set('clientId',e.target.value)}>{cliOpts}</Sel>
+          <ClientSearch label="Cliente" clients={clients} value={f.clientId} onChange={v=>set('clientId',v)} onCreateClient={onCreateClient}/>
           <div style={{marginTop:8}}><G2 stack={mobile} gap={8}><Inp label="Monto que te debe" type="number" placeholder="0.00" value={f.creditAmt} onChange={e=>set('creditAmt',e.target.value)}/><Sel label="Moneda" value={f.creditCur} onChange={e=>set('creditCur',e.target.value)}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</Sel></G2></div>
           {Object.entries(existCreds).filter(([,v])=>v>0).length>0&&<div style={{marginTop:6,fontSize:11,color:'#b45309'}}>Deuda actual: {Object.entries(existCreds).filter(([,v])=>v>0).map(([c,v])=>fmt(v,c)).join(' / ')}</div>}
         </div>
       </>}
 
       {mode==='credit_in'&&<>
-        <Sel label="Cliente que paga" value={f.clientId} onChange={e=>set('clientId',e.target.value)}>{cliOpts}</Sel>
+        <ClientSearch label="Cliente que paga" clients={clients} value={f.clientId} onChange={v=>set('clientId',v)} onCreateClient={onCreateClient}/>
         {Object.entries(existCreds).filter(([,v])=>v>0).length>0&&(
           <div style={{background:'#fffbeb',border:'1.5px solid #fcd34d',borderRadius:10,padding:'10px 12px',fontSize:12}}>
             <div style={{fontWeight:700,marginBottom:4,color:'#b45309'}}>Deuda pendiente:</div>
@@ -347,7 +407,7 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
         </div>
         <div style={{background:'#fff1f2',border:'1.5px solid #fda4af',borderRadius:12,padding:'10px 12px'}}>
           <div style={{fontSize:10,fontWeight:800,color:'#be123c',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>💳 Lo que les quedás debiendo</div>
-          <Sel label="Corresponsal" value={f.clientId} onChange={e=>set('clientId',e.target.value)}>{cliOpts}</Sel>
+          <ClientSearch label="Corresponsal" clients={clients} value={f.clientId} onChange={v=>set('clientId',v)} onCreateClient={onCreateClient}/>
           <div style={{marginTop:8}}>
             <G2 stack={mobile} gap={8}>
               <Inp label="Monto que debés" type="number" placeholder="0.00" value={f.creditAmt} onChange={e=>set('creditAmt',e.target.value)}/>
@@ -364,7 +424,7 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
       </>}
 
       {mode==='debt_pay'&&<>
-        <Sel label="Corresponsal al que pagás" value={f.clientId} onChange={e=>set('clientId',e.target.value)}>{cliOpts}</Sel>
+        <ClientSearch label="Corresponsal al que pagás" clients={clients} value={f.clientId} onChange={v=>set('clientId',v)} onCreateClient={onCreateClient}/>
         {/* Show current debts */}
         {Object.entries(existCreds).filter(([,v])=>v<0).length>0&&(
           <div style={{background:'#fff1f2',border:'1.5px solid #fda4af',borderRadius:10,padding:'10px 12px',fontSize:12}}>
@@ -649,7 +709,7 @@ function Dashboard({accounts,clients,ops,credits,setTab}){
 }
 
 // ── Operaciones ───────────────────────────────────────────────────────────────
-function Operaciones({accounts,clients,credits,ops,onAddOp,onEditOp,onDeleteOp}){
+function Operaciones({accounts,clients,credits,ops,onAddOp,onEditOp,onDeleteOp,onCreateClient}){
   const mobile=useIsMobile()
   const [open,setOpen]=useState(false),[editOp,setEdit]=useState(null)
   const [confirmId,setConfirmId]=useState(null)
@@ -669,7 +729,11 @@ function Operaciones({accounts,clients,credits,ops,onAddOp,onEditOp,onDeleteOp})
         <Btn primary onClick={()=>{setEdit(null);setOpen(true)}}>+ Nueva</Btn>
       </div>
       <Modal open={open} onClose={()=>{setOpen(false);setEdit(null)}} title={editOp?'Editar operación':'Nueva operación'}>
-        <OpForm accounts={accounts} clients={clients} credits={credits} editOp={editOp} onSubmit={(op,orig)=>orig?onEditOp(op,orig):onAddOp(op)} onClose={()=>{setOpen(false);setEdit(null)}}/>
+        <OpForm accounts={accounts} clients={clients} credits={credits} editOp={editOp}
+          onSubmit={(op,orig)=>orig?onEditOp(op,orig):onAddOp(op)}
+          onClose={()=>{setOpen(false);setEdit(null)}}
+          onCreateClient={onCreateClient}
+        />
       </Modal>
       <Confirm open={!!confirmId} onClose={()=>setConfirmId(null)} onConfirm={()=>onDeleteOp(confirmId)} message="Se eliminará la operación y su impacto en los saldos se revertirá automáticamente."/>
       <input placeholder="Buscar..." value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} style={{padding:'8px 12px',border:'1.5px solid #e0e0da',borderRadius:10,fontSize:13,background:'#fff'}}/>
@@ -855,8 +919,7 @@ function Clientes({accounts,clients,ops,credits,onAddClient,onEditClient,onDelet
         {filtered.map(c=>{
           const cOps=clientOps(c.id,ops),profit=cOps.reduce((s,o)=>s+(o.profit||0),0)
           const creds=cliCreds(c.id,credits)
-          const openCr=Object.entries(creds).filter(([,v])=>v>0)
-      const openDt=Object.entries(creds).filter(([,v])=>v<0)   // they owe us
+          const openCr=Object.entries(creds).filter(([,v])=>v>0)   // they owe us
           const openDt=Object.entries(creds).filter(([,v])=>v<0)   // we owe them
           const color=cliColor(c.name)
           return (
@@ -1184,6 +1247,17 @@ export default function TreasuryApp(){
 
   const run = async (fn, ...refetches) => { try{ await fn(); refetches.forEach(r=>r()) }catch(e){ alert('Error: '+e.message) } }
 
+  // Inline client creation from within OpForm dropdown
+  const handleCreateClientInline = async (name, cb) => {
+    try {
+      const { supabase } = await import('../lib/supabase')
+      const { data, error } = await supabase.from('clients').insert({name, phone:'', notes:''}).select('id').single()
+      if(error) throw error
+      await refetchClients()
+      cb && cb(data.id)
+    } catch(e){ alert('Error al crear cliente: '+e.message) }
+  }
+
   return (
     <div style={{display:'flex',minHeight:'100vh',fontFamily:"'DM Sans',sans-serif",flexDirection:mobile?'column':'row'}}>
       <style>{`*{box-sizing:border-box;margin:0;padding:0}body{background:#f4f4f0}`}</style>
@@ -1194,6 +1268,7 @@ export default function TreasuryApp(){
           onAddOp={op=>run(()=>addOperation(op),refetchOps,refetchAccounts,refetchCredits)}
           onEditOp={(op,orig)=>run(()=>editOperation(op,orig),refetchOps,refetchAccounts,refetchCredits)}
           onDeleteOp={id=>run(()=>deleteOperation(id),refetchOps,refetchAccounts,refetchCredits)}
+          onCreateClient={handleCreateClientInline}
         />}
         {tab==='Clientes'   &&<Clientes    accounts={accounts} clients={clients} ops={ops} credits={credits}
           onAddClient={c=>run(()=>addClient(c),refetchClients)}
