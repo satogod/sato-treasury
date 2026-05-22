@@ -255,15 +255,93 @@ function ClientSearch({label, clients, value, onChange, onCreateClient, optional
 }
 
 // ── Op Form ───────────────────────────────────────────────────────────────────
+// ── Leg row components (defined at module level to avoid focus loss) ───────────
+function AccRow({leg, idx, side, accounts, onAccChange, onAmtChange, onRemove}) {
+  return (
+    <div style={{display:'flex',gap:8,alignItems:'flex-end',padding:'8px',background:side==='out'?'#fff5f5':'#f0fdf4',borderRadius:8,marginBottom:6}}>
+      <div style={{flex:2}}>
+        <AccSearch
+          label={idx===0?(side==='out'?'Cuenta origen':'Cuenta destino'):''}
+          accounts={accounts} value={leg.accId}
+          onChange={v=>onAccChange(idx,v)}
+        />
+      </div>
+      <div style={{flex:1}}>
+        <Inp
+          label={idx===0?'Monto':''}
+          type="number" placeholder="0.00"
+          value={leg.amt}
+          onChange={e=>onAmtChange(idx,e.target.value)}
+        />
+      </div>
+      {onRemove&&<button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0}}>×</button>}
+      {!onRemove&&<div style={{width:22,flexShrink:0}}/>}
+    </div>
+  )
+}
+
+function CredRow({leg, idx, onAmtChange, onCurChange, onRemove}) {
+  return (
+    <div style={{display:'flex',gap:8,alignItems:'flex-end',padding:'8px',background:'#fffbeb',borderRadius:8,marginBottom:6}}>
+      <div style={{flex:1}}>
+        <Inp label={idx===0?'Monto crédito':''} type="number" placeholder="0.00" value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
+      </div>
+      <div style={{width:110,flexShrink:0}}>
+        <Sel label={idx===0?'Moneda':''} value={leg.cur||'USD'} onChange={e=>onCurChange(idx,e.target.value)}>
+          {CURRENCIES.map(c=><option key={c}>{c}</option>)}
+        </Sel>
+      </div>
+      <button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0}}>×</button>
+    </div>
+  )
+}
+
+// Credit-deduction row: reduces an existing credit balance (they pay us via credit discount)
+function CreditDeductRow({leg, idx, clients, credits, onClientChange, onAmtChange, onCurChange, onRemove}) {
+  const clientBals = leg.clientId ? cliCreds(leg.clientId, credits) : {}
+  const availCurs  = Object.entries(clientBals).filter(([,v])=>v>0).map(([c])=>c)
+  return (
+    <div style={{border:'1px solid #fcd34d',borderRadius:8,padding:'8px 10px',marginBottom:6,background:'#fffbeb'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+        <span style={{fontSize:10,fontWeight:700,color:'#b45309',textTransform:'uppercase',letterSpacing:'0.04em'}}>💳 Descuento de deuda del cliente</span>
+        <button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:16}}>×</button>
+      </div>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <div style={{flex:2,minWidth:120}}>
+          <Fld label="Cliente">
+            <select value={leg.clientId||''} onChange={e=>onClientChange(idx,e.target.value)} style={{background:'#fff',border:'1px solid '+T.border,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,color:T.text}}>
+              {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Fld>
+        </div>
+        <div style={{flex:1,minWidth:80}}>
+          <Inp label="Monto a descontar" type="number" placeholder="0.00" value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
+        </div>
+        <div style={{width:90,flexShrink:0}}>
+          <Sel label="Moneda" value={leg.cur||'USD'} onChange={e=>onCurChange(idx,e.target.value)}>
+            {(availCurs.length>0?availCurs:CURRENCIES).map(c=><option key={c}>{c}</option>)}
+          </Sel>
+        </div>
+      </div>
+      {leg.clientId&&Object.keys(clientBals).length>0&&(
+        <div style={{marginTop:6,fontSize:11,color:'#b45309'}}>
+          Saldo disponible: {Object.entries(clientBals).filter(([,v])=>v>0).map(([c,v])=>fmt(v,c)).join(' · ')}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp}){
   const mobile = useIsMobile()
   const [mode,setMode] = useState(editOp?.mode||'exchange')
 
   // Multi-leg state: outs = legs that leave our accounts/create debt
   //                  ins  = legs that enter our accounts/cancel debt
-  const mkOut = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USDT')?.id||accounts[0]?.id, amt:''})
-  const mkIn  = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USD'&&a.type==='Efectivo')?.id||accounts[0]?.id, amt:''})
-  const mkCred= () => ({id:uid(), kind:'credit',  cur:'USD', amt:''})
+  const mkOut  = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USDT')?.id||accounts[0]?.id, amt:''})
+  const mkIn   = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USD'&&a.type==='Efectivo')?.id||accounts[0]?.id, amt:''})
+  const mkCred = () => ({id:uid(), kind:'credit',  cur:'USD', amt:''})
+  const mkDebt = () => ({id:uid(), kind:'debt_deduct', clientId:clients[0]?.id||'', cur:'USD', amt:''})
 
   const initState = () => {
     if(editOp){
@@ -296,6 +374,7 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
   const addOut = () => setS(x=>({...x, outs:[...x.outs, mkOut()]}))
   const addIn  = () => setS(x=>({...x, ins:[...x.ins, mkIn()]}))
   const addInCred = () => setS(x=>({...x, ins:[...x.ins, mkCred()]}))
+  const addInDebt = () => setS(x=>({...x, outs:[...x.outs, mkDebt()]}))
   const rmOut  = (idx) => setS(x=>({...x, outs:x.outs.filter((_,i)=>i!==idx)}))
   const rmIn   = (idx) => setS(x=>({...x, ins:x.ins.filter((_,i)=>i!==idx)}))
 
@@ -326,21 +405,24 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
     for(const o of s.outs){
       const amt=parseFloat(o.amt)||0
       if(!amt) continue
-      const acc=accounts.find(x=>x.id===o.accId)
       if(o.kind==='account'){
+        const acc=accounts.find(x=>x.id===o.accId)
         legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:-amt})
-      } else {
-        legs.push({id:uid(),kind:'credit',clientId:s.clientId,clientName:client?.name,cur:o.cur,delta:-amt})
+      } else if(o.kind==='debt_deduct'){
+        // Reduces the client's credit balance (they "pay" via credit discount)
+        const cli=clients.find(c=>c.id===o.clientId)
+        legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:-amt})
       }
     }
     for(const o of s.ins){
       const amt=parseFloat(o.amt)||0
       if(!amt) continue
-      const acc=accounts.find(x=>x.id===o.accId)
       if(o.kind==='account'){
+        const acc=accounts.find(x=>x.id===o.accId)
         legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:amt})
-      } else {
-        legs.push({id:uid(),kind:'credit',clientId:s.clientId,clientName:client?.name,cur:o.cur,delta:amt})
+      } else if(o.kind==='credit'){
+        const cli=clients.find(c=>c.id===s.clientId)
+        legs.push({id:uid(),kind:'credit',clientId:s.clientId,clientName:cli?.name,cur:o.cur,delta:amt})
       }
     }
     if(!legs.length){alert('Agregá al menos un movimiento');return}
@@ -348,7 +430,7 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
       id:editOp?editOp.id:uid(),
       createdAt:new Date(s.date).toISOString(),
       detail:s.detail, mode,
-      clientId:s.clientId||null, clientName:client?.name||null,
+      clientId:s.clientId||null, clientName:clients.find(c=>c.id===s.clientId)?.name||null,
       rate:parseFloat(s.rate)||null, profit:autoProfit, legs
     },editOp)
     onClose()
@@ -363,37 +445,6 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
     {k:'transfer',  icon:'↔', label:'Transferencia', desc:'Entre tus cuentas'},
   ]
 
-  // Helper: one row in the multi-leg list
-  const AccRow = ({leg,idx,side}) => {
-    const acc = accounts.find(a=>a.id===leg.accId)
-    const setter = side==='out'?setOut:setIn
-    return (
-      <div style={{display:'flex',gap:8,alignItems:'flex-end',padding:'8px',background:side==='out'?'#fff5f5':'#f0fdf4',borderRadius:8,marginBottom:6}}>
-        <div style={{flex:2}}>
-          <AccSearch label={idx===0?(side==='out'?'Cuenta origen':'Cuenta destino'):''} accounts={accounts} value={leg.accId} onChange={v=>setter(idx,'accId',v)}/>
-        </div>
-        <div style={{flex:1}}>
-          <Inp label={idx===0?'Monto':''} type="number" placeholder="0.00" value={leg.amt} onChange={e=>setter(idx,'amt',e.target.value)}/>
-        </div>
-        {idx>0&&<button onClick={()=>side==='out'?rmOut(idx):rmIn(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0}}>×</button>}
-        {idx===0&&<div style={{width:22,flexShrink:0}}/>}
-      </div>
-    )
-  }
-
-  const CredRow = ({leg,idx}) => (
-    <div style={{display:'flex',gap:8,alignItems:'flex-end',padding:'8px',background:'#fffbeb',borderRadius:8,marginBottom:6}}>
-      <div style={{flex:1}}>
-        <Inp label={idx===0?'Monto crédito':''}  type="number" placeholder="0.00" value={leg.amt} onChange={e=>setIn(idx,'amt',e.target.value)}/>
-      </div>
-      <div style={{width:110,flexShrink:0}}>
-        <Sel label={idx===0?'Moneda':''} value={leg.cur||'USD'} onChange={e=>setIn(idx,'cur',e.target.value)}>
-          {CURRENCIES.map(c=><option key={c}>{c}</option>)}
-        </Sel>
-      </div>
-      <button onClick={()=>rmIn(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0}}>×</button>
-    </div>
-  )
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
@@ -438,23 +489,58 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
       {/* ── SALIDAS ── */}
       <div style={{background:'#fff5f5',border:'1px solid #fecaca',borderRadius:10,padding:'10px 12px'}}>
         <div style={{fontSize:11,fontWeight:600,color:T.red,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
-          📤 {mode==='credit_out'||mode==='debt_pay'?'Lo que enviás / pagás':'Sale de tus cuentas'}
+          📤 Sale / se descuenta
         </div>
-        {s.outs.map((leg,idx)=><AccRow key={leg.id} leg={leg} idx={idx} side="out"/>)}
-        <button onClick={addOut} style={{background:'none',border:'1px dashed '+T.red,borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.red,width:'100%',marginTop:2}}>
-          + Agregar salida
-        </button>
+        {s.outs.map((leg,idx)=>(
+          leg.kind==='debt_deduct'
+            ? <CreditDeductRow
+                key={leg.id} leg={leg} idx={idx}
+                clients={clients} credits={credits}
+                onClientChange={(i,v)=>setOut(i,'clientId',v)}
+                onAmtChange={(i,v)=>setOut(i,'amt',v)}
+                onCurChange={(i,v)=>setOut(i,'cur',v)}
+                onRemove={rmOut}
+              />
+            : <AccRow
+                key={leg.id} leg={leg} idx={idx} side="out"
+                accounts={accounts}
+                onAccChange={(i,v)=>setOut(i,'accId',v)}
+                onAmtChange={(i,v)=>setOut(i,'amt',v)}
+                onRemove={idx>0?rmOut:null}
+              />
+        ))}
+        <div style={{display:'flex',gap:6,marginTop:2}}>
+          <button onClick={addOut} style={{flex:1,background:'none',border:'1px dashed '+T.red,borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.red}}>
+            + Cuenta
+          </button>
+          {mode!=='transfer'&&(
+            <button onClick={addInDebt} style={{flex:1,background:'none',border:'1px dashed #b45309',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:'#b45309'}}>
+              + Descuento de deuda
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── ENTRADAS ── */}
       <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:10,padding:'10px 12px'}}>
         <div style={{fontSize:11,fontWeight:600,color:T.green,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
-          📥 {mode==='credit_in'||mode==='debt_in'?'Lo que recibís / registrás':'Entra a tus cuentas'}
+          📥 Entra a tus cuentas
         </div>
         {s.ins.map((leg,idx)=>(
           leg.kind==='account'
-            ? <AccRow key={leg.id} leg={leg} idx={idx} side="in"/>
-            : <CredRow key={leg.id} leg={leg} idx={idx}/>
+            ? <AccRow
+                key={leg.id} leg={leg} idx={idx} side="in"
+                accounts={accounts}
+                onAccChange={(i,v)=>setIn(i,'accId',v)}
+                onAmtChange={(i,v)=>setIn(i,'amt',v)}
+                onRemove={idx>0?rmIn:null}
+              />
+            : <CredRow
+                key={leg.id} leg={leg} idx={idx}
+                onAmtChange={(i,v)=>setIn(i,'amt',v)}
+                onCurChange={(i,v)=>setIn(i,'cur',v)}
+                onRemove={rmIn}
+              />
         ))}
         <div style={{display:'flex',gap:6,marginTop:2}}>
           <button onClick={addIn} style={{flex:1,background:'none',border:'1px dashed '+T.green,borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.green}}>
