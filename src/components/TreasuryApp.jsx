@@ -33,6 +33,7 @@ const uid   = () => Math.random().toString(36).slice(2,9)
 const accBal       = acc => Number(acc.balance||0)
 const cliCreds     = (cid,credits) => { const b={}; credits.filter(r=>r.client_id===cid).forEach(r=>{b[r.currency]=(b[r.currency]||0)+Number(r.balance)}); return b }
 const allCredByCur = credits => { const b={}; credits.filter(r=>Number(r.balance)>0).forEach(r=>{b[r.currency]=(b[r.currency]||0)+Number(r.balance)}); return b }
+const allDebtsByCur = credits => { const b={}; credits.filter(r=>Number(r.balance)<0).forEach(r=>{b[r.currency]=(b[r.currency]||0)+Number(r.balance)}); return b }
 const accSumByType = accounts => { const g={}; ACC_TYPES.forEach(t=>{g[t]={}}); accounts.forEach(a=>{const b=accBal(a); if(!g[a.type])g[a.type]={}; g[a.type][a.currency]=(g[a.type][a.currency]||0)+b}); return g }
 const netWorth     = (accounts,credits) => { let t=accounts.reduce((s,a)=>s+toUSD(accBal(a),a.currency),0); credits.forEach(r=>{t+=toUSD(Number(r.balance),r.currency)}); return t }
 const clientOps    = (cid,ops) => ops.filter(o=>o.clientId===cid&&!o.isReversal).sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt))
@@ -187,20 +188,20 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
 
   // Auto profit
   const autoProfit = useMemo(()=>{
-    if(mode==='transfer') return null
+    if(mode==='transfer'||mode==='debt_in'||mode==='debt_pay') return null
     const fa=parseFloat(f.fromAmt),ta=parseFloat(mode==='credit_out'?f.creditAmt:f.toAmt)
     const tc=mode==='credit_out'?f.creditCur:(toAcc?.currency||'USD')
     if(!fa||!ta) return null
     return +(toUSD(ta,tc)-toUSD(fa,fromAcc?.currency||'USD')).toFixed(2)
   },[mode,f,fromAcc,toAcc])
 
-  // Auto rate — recalculate whenever amounts change
+  // Auto rate
   const autoRate = useMemo(()=>{
-    if(mode==='transfer') return null
+    if(mode==='transfer'||mode==='debt_in'||mode==='debt_pay') return null
     const fa=parseFloat(f.fromAmt),ta=parseFloat(mode==='credit_out'?f.creditAmt:f.toAmt)
     const fc=fromAcc?.currency||'USD'
     const tc=mode==='credit_out'?f.creditCur:(toAcc?.currency||'USD')
-    if(fc===tc) return null // same currency, no rate
+    if(fc===tc) return null
     return calcRate(fa, fc, ta, tc)
   },[mode,f,fromAcc,toAcc])
 
@@ -219,6 +220,18 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
       if(!ca||!ta){alert('Ingresá ambos montos');return}
       legs.push({id:uid(),kind:'credit',clientId:f.clientId,clientName:client?.name,cur:f.creditCur,delta:-ca})
       legs.push({id:uid(),kind:'account',accId:f.toAccId,cur:toAcc?.currency,delta:ta})
+    } else if(mode==='debt_in'){
+      // Ellos nos envían → entra a nuestra cuenta, nosotros les debemos (delta negativo en ledger del cliente)
+      if(!ca||!ta){alert('Ingresá ambos montos');return}
+      if(!f.clientId){alert('Seleccioná un corresponsal');return}
+      legs.push({id:uid(),kind:'account',accId:f.toAccId,cur:toAcc?.currency,delta:ta})
+      legs.push({id:uid(),kind:'credit',clientId:f.clientId,clientName:client?.name,cur:f.creditCur,delta:-ca})
+    } else if(mode==='debt_pay'){
+      // Nosotros pagamos lo que debemos → sale de nuestra cuenta, cancela deuda negativa
+      if(!fa||!ca){alert('Ingresá ambos montos');return}
+      if(!f.clientId){alert('Seleccioná un corresponsal');return}
+      legs.push({id:uid(),kind:'account',accId:f.fromAccId,cur:fromAcc?.currency,delta:-fa})
+      legs.push({id:uid(),kind:'credit',clientId:f.clientId,clientName:client?.name,cur:f.creditCur,delta:ca})
     } else if(mode==='transfer'){
       if(!fa){alert('Ingresá el monto');return}
       legs.push({id:uid(),kind:'account',accId:f.fromAccId,cur:fromAcc?.currency,delta:-fa})
@@ -230,11 +243,18 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
 
   const accOpts = accounts.map(a=><option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)
   const cliOpts = clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)
-  const MODES = [{k:'exchange',icon:'⇄',label:'Cambio cerrado',desc:'Pago en el momento'},{k:'credit_out',icon:'📤',label:'Crédito dado',desc:'Te queda debiendo'},{k:'credit_in',icon:'📥',label:'Cobro de deuda',desc:'Salda su deuda'},{k:'transfer',icon:'↔',label:'Transferencia',desc:'Entre tus cuentas'}]
+  const MODES = [
+    {k:'exchange',  icon:'⇄', label:'Cambio cerrado', desc:'Pago en el momento'},
+    {k:'credit_out',icon:'📤',label:'Crédito dado',   desc:'Te queda debiendo'},
+    {k:'credit_in', icon:'📥',label:'Cobro de deuda', desc:'Salda su deuda'},
+    {k:'debt_in',   icon:'📨',label:'Deuda tomada',   desc:'Recibís, quedás debiendo'},
+    {k:'debt_pay',  icon:'💸',label:'Pago de deuda',  desc:'Pagás lo que debés'},
+    {k:'transfer',  icon:'↔', label:'Transferencia',  desc:'Entre tus cuentas'},
+  ]
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
         {MODES.map(m=>(
           <button key={m.k} onClick={()=>setMode(m.k)} style={{background:mode===m.k?'#0f0f0f':'#f8f8f4',color:mode===m.k?'#fff':'#555',border:'1.5px solid '+(mode===m.k?'#0f0f0f':'#e8e8e2'),borderRadius:10,padding:'8px 10px',cursor:'pointer',textAlign:'left'}}>
             <div style={{fontSize:14,marginBottom:1}}>{m.icon}</div>
@@ -317,6 +337,62 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,editOp}){
         </div>
       )}
 
+      {mode==='debt_in'&&<>
+        <div style={{background:'#fdf2f8',border:'1.5px solid #f0abfc',borderRadius:12,padding:'10px 12px'}}>
+          <div style={{fontSize:10,fontWeight:800,color:'#a21caf',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>📨 Lo que recibís de ellos</div>
+          <G2 stack={mobile}>
+            <AccSearch label="Entra a tu cuenta" accounts={accounts} value={f.toAccId} onChange={v=>set('toAccId',v)}/>
+            <Inp label={'Monto ('+(toAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.toAmt} onChange={e=>set('toAmt',e.target.value)}/>
+          </G2>
+        </div>
+        <div style={{background:'#fff1f2',border:'1.5px solid #fda4af',borderRadius:12,padding:'10px 12px'}}>
+          <div style={{fontSize:10,fontWeight:800,color:'#be123c',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>💳 Lo que les quedás debiendo</div>
+          <Sel label="Corresponsal" value={f.clientId} onChange={e=>set('clientId',e.target.value)}>{cliOpts}</Sel>
+          <div style={{marginTop:8}}>
+            <G2 stack={mobile} gap={8}>
+              <Inp label="Monto que debés" type="number" placeholder="0.00" value={f.creditAmt} onChange={e=>set('creditAmt',e.target.value)}/>
+              <Sel label="Moneda" value={f.creditCur} onChange={e=>set('creditCur',e.target.value)}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</Sel>
+            </G2>
+          </div>
+          {/* Show existing debt to this client */}
+          {Object.entries(existCreds).filter(([,v])=>v<0).length>0&&(
+            <div style={{marginTop:8,fontSize:11,color:'#be123c'}}>
+              Deuda actual: {Object.entries(existCreds).filter(([,v])=>v<0).map(([c,v])=>fmt(Math.abs(v),c)).join(' / ')}
+            </div>
+          )}
+        </div>
+      </>}
+
+      {mode==='debt_pay'&&<>
+        <Sel label="Corresponsal al que pagás" value={f.clientId} onChange={e=>set('clientId',e.target.value)}>{cliOpts}</Sel>
+        {/* Show current debts */}
+        {Object.entries(existCreds).filter(([,v])=>v<0).length>0&&(
+          <div style={{background:'#fff1f2',border:'1.5px solid #fda4af',borderRadius:10,padding:'10px 12px',fontSize:12}}>
+            <div style={{fontWeight:700,marginBottom:4,color:'#be123c'}}>Deudas pendientes con {client?.name}:</div>
+            {Object.entries(existCreds).filter(([,v])=>v<0).map(([c,v])=>(
+              <div key={c} style={{display:'flex',justifyContent:'space-between'}}>
+                <span style={{color:'#888'}}>{c}</span>
+                <span style={{fontWeight:700,color:'#be123c'}}>{fmt(Math.abs(v),c)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{background:'#fff1f2',border:'1.5px solid #fda4af',borderRadius:12,padding:'10px 12px'}}>
+          <div style={{fontSize:10,fontWeight:800,color:'#be123c',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>💸 Deuda que cancelás</div>
+          <G2 stack={mobile} gap={8}>
+            <Inp label="Monto que pagás" type="number" placeholder="0.00" value={f.creditAmt} onChange={e=>set('creditAmt',e.target.value)}/>
+            <Sel label="Moneda" value={f.creditCur} onChange={e=>set('creditCur',e.target.value)}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</Sel>
+          </G2>
+        </div>
+        <div style={{background:'#fff5f5',border:'1.5px solid #fecaca',borderRadius:12,padding:'10px 12px'}}>
+          <div style={{fontSize:10,fontWeight:800,color:'#dc2626',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>📤 Sale de tu cuenta</div>
+          <G2 stack={mobile}>
+            <AccSearch label="Cuenta" accounts={accounts} value={f.fromAccId} onChange={v=>set('fromAccId',v)}/>
+            <Inp label={'Monto ('+(fromAcc?.currency||'—')+')'} type="number" placeholder="0.00" value={f.fromAmt} onChange={e=>set('fromAmt',e.target.value)}/>
+          </G2>
+        </div>
+      </>}
+
       {/* Auto rate display */}
       {autoRate!==null&&(
         <div style={{background:'#f0f9ff',border:'1.5px solid #bae6fd',borderRadius:10,padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -353,7 +429,7 @@ function AccDetail({acc,ops,onUpdateAcc}){
     })
     return rows.sort((a,b)=>new Date(a.date)-new Date(b.date))
   },[ops,acc.id])
-  const modeLab = {exchange:'Cambio',credit_out:'Crédito',credit_in:'Cobro',transfer:'Transfer.'}
+  const modeLab = {exchange:'Cambio',credit_out:'Crédito',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.'}
   let running = Number(acc.opening_bal||0)
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
@@ -450,9 +526,10 @@ function Dashboard({accounts,clients,ops,credits,setTab}){
   const nw=useMemo(()=>netWorth(accounts,credits),[accounts,credits])
   const myUSD=useMemo(()=>accounts.reduce((s,a)=>s+toUSD(accBal(a),a.currency),0),[accounts])
   const crUSD=useMemo(()=>credits.reduce((s,r)=>s+toUSD(Number(r.balance),r.currency),0),[credits])
-  const credSumm=useMemo(()=>{const r=[];clients.forEach(c=>{const b=cliCreds(c.id,credits);const d=Object.entries(b).filter(([,v])=>v>0);if(d.length>0)r.push({c,debts:d})});return r},[clients,credits])
+  const credSumm=useMemo(()=>{const r=[];clients.forEach(c=>{const b=cliCreds(c.id,credits);const d=Object.entries(b).filter(([,v])=>v>0);if(d.length>0)r.push({c,debts:d,type:'credit'})});return r},[clients,credits])
+  const debtSumm=useMemo(()=>{const r=[];clients.forEach(c=>{const b=cliCreds(c.id,credits);const d=Object.entries(b).filter(([,v])=>v<0);if(d.length>0)r.push({c,debts:d,type:'debt'})});return r},[clients,credits])
   const accSumm=useMemo(()=>accSumByType(accounts),[accounts])
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',transfer:'Transfer.'}
+  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.'}
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
@@ -471,7 +548,7 @@ function Dashboard({accounts,clients,ops,credits,setTab}){
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-        {[{l:'Ganancia hoy',v:fmt(today,'USD'),bg:'#fde047'},{l:'Ganancia mes',v:fmt(month,'USD'),bg:'#f9a8d4'},{l:'Créditos abiertos',v:credSumm.length,bg:credSumm.length>0?'#fca5a5':'#86efac'},{l:'Operaciones',v:visOps.length,bg:'#93c5fd'}].map(({l,v,bg})=>(
+        {[{l:'Ganancia hoy',v:fmt(today,'USD'),bg:'#fde047'},{l:'Ganancia mes',v:fmt(month,'USD'),bg:'#f9a8d4'},{l:'Me deben',v:credSumm.length,bg:credSumm.length>0?'#fef9c3':'#86efac'},{l:'Les debo',v:debtSumm.length,bg:debtSumm.length>0?'#fca5a5':'#86efac'}].map(({l,v,bg})=>(
           <Card key={l} style={{background:bg,border:'none',padding:'12px 14px'}}>
             <div style={{fontSize:10,fontWeight:800,fontFamily:"'Syne',sans-serif",marginBottom:4,textTransform:'uppercase',letterSpacing:'0.06em'}}>{l}</div>
             <div style={{fontSize:mobile?18:22,fontWeight:800,fontFamily:"'Syne',sans-serif"}}>{v}</div>
@@ -504,20 +581,39 @@ function Dashboard({accounts,clients,ops,credits,setTab}){
           })}
         </Card>
         <Card>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Créditos abiertos</div>
-          {credSumm.length===0
-            ?<div style={{textAlign:'center',padding:'12px 0'}}><div style={{fontSize:22}}>✓</div><div style={{fontSize:12,color:'#888',marginTop:4}}>Sin créditos</div></div>
-            :credSumm.map(({c,debts})=>(
-              <div key={c.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',marginBottom:6,background:'#fffbeb',borderRadius:10,border:'1px solid #fcd34d'}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
-                  <div style={{width:26,height:26,borderRadius:'50%',background:cliColor(c.name),display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,fontFamily:"'Syne',sans-serif",flexShrink:0}}>{c.name.slice(0,2)}</div>
-                  <span style={{fontWeight:600,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</span>
-                </div>
-                <div style={{textAlign:'right',flexShrink:0,marginLeft:8}}>
-                  {debts.map(([cur,v])=><div key={cur} style={{fontSize:12,fontWeight:700,color:'#b45309'}}>{fmt(v,cur)}</div>)}
-                </div>
-              </div>
-            ))
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Posiciones abiertas</div>
+          {credSumm.length===0&&debtSumm.length===0
+            ?<div style={{textAlign:'center',padding:'12px 0'}}><div style={{fontSize:22}}>✓</div><div style={{fontSize:12,color:'#888',marginTop:4}}>Sin posiciones abiertas</div></div>
+            :<>
+              {credSumm.length>0&&<>
+                <div style={{fontSize:10,fontWeight:700,color:'#b45309',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Me deben →</div>
+                {credSumm.map(({c,debts})=>(
+                  <div key={c.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 10px',marginBottom:4,background:'#fffbeb',borderRadius:10,border:'1px solid #fcd34d'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
+                      <div style={{width:24,height:24,borderRadius:'50%',background:cliColor(c.name),display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:800,fontFamily:"'Syne',sans-serif",flexShrink:0}}>{c.name.slice(0,2)}</div>
+                      <span style={{fontWeight:600,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</span>
+                    </div>
+                    <div style={{textAlign:'right',flexShrink:0,marginLeft:8}}>
+                      {debts.map(([cur,v])=><div key={cur} style={{fontSize:12,fontWeight:700,color:'#b45309'}}>{fmt(v,cur)}</div>)}
+                    </div>
+                  </div>
+                ))}
+              </>}
+              {debtSumm.length>0&&<>
+                <div style={{fontSize:10,fontWeight:700,color:'#be123c',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6,marginTop:credSumm.length>0?10:0}}>← Les debo</div>
+                {debtSumm.map(({c,debts})=>(
+                  <div key={c.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 10px',marginBottom:4,background:'#fff1f2',borderRadius:10,border:'1px solid #fda4af'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
+                      <div style={{width:24,height:24,borderRadius:'50%',background:cliColor(c.name),display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:800,fontFamily:"'Syne',sans-serif",flexShrink:0}}>{c.name.slice(0,2)}</div>
+                      <span style={{fontWeight:600,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</span>
+                    </div>
+                    <div style={{textAlign:'right',flexShrink:0,marginLeft:8}}>
+                      {debts.map(([cur,v])=><div key={cur} style={{fontSize:12,fontWeight:700,color:'#be123c'}}>{fmt(Math.abs(v),cur)}</div>)}
+                    </div>
+                  </div>
+                ))}
+              </>}
+            </>
           }
         </Card>
       </div>
@@ -563,8 +659,8 @@ function Operaciones({accounts,clients,credits,ops,onAddOp,onEditOp,onDeleteOp})
   const visible=ops.filter(o=>!o.isReversal)
   const filtered=useMemo(()=>[...visible].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).filter(o=>!q||[o.detail,o.clientName].some(s=>(s||'').toLowerCase().includes(q.toLowerCase()))),[visible,q])
   const pages=Math.ceil(filtered.length/PER)||1,paged=filtered.slice((page-1)*PER,page*PER)
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',transfer:'Transfer.'}
-  const modeBg={exchange:'#e0f2fe',credit_out:'#fef9c3',credit_in:'#dcfce7',transfer:'#f5f3ff'}
+  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.'}
+  const modeBg={exchange:'#e0f2fe',credit_out:'#fef9c3',credit_in:'#dcfce7',debt_in:'#fdf2f8',debt_pay:'#fff1f2',transfer:'#f5f3ff'}
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
@@ -676,13 +772,14 @@ function ClienteDetalle({client,ops,accounts,credits}){
   const openCr=Object.entries(creds).filter(([,v])=>v>0)
   const inRange=cOps.filter(o=>o.createdAt.slice(0,10)>=df&&o.createdAt.slice(0,10)<=dt)
   const totalP=cOps.reduce((s,o)=>s+(o.profit||0),0)
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',transfer:'Transfer.'}
+  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.'}
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:10}}>
         <div style={{background:'#f0f9ff',borderRadius:12,padding:'10px 12px'}}><div style={{fontSize:10,fontWeight:800,color:'#0369a1',textTransform:'uppercase',marginBottom:3}}>Operaciones</div><div style={{fontSize:18,fontWeight:800,fontFamily:"'Syne',sans-serif"}}>{cOps.length}</div></div>
         <div style={{background:totalP>=0?'#f0fdf4':'#fef2f2',borderRadius:12,padding:'10px 12px'}}><div style={{fontSize:10,fontWeight:800,color:totalP>=0?'#166534':'#991b1b',textTransform:'uppercase',marginBottom:3}}>Profit total</div><div style={{fontSize:18,fontWeight:800,fontFamily:"'Syne',sans-serif",color:totalP>=0?'#16a34a':'#dc2626'}}>{(totalP>=0?'+':'')+fmt(totalP,'USD')}</div></div>
-        {openCr.length>0&&<div style={{background:'#fffbeb',borderRadius:12,padding:'10px 12px',border:'1.5px solid #fcd34d'}}><div style={{fontSize:10,fontWeight:800,color:'#b45309',textTransform:'uppercase',marginBottom:3}}>Me debe</div>{openCr.map(([cur,v])=><div key={cur} style={{fontSize:15,fontWeight:800,fontFamily:"'Syne',sans-serif",color:'#b45309',wordBreak:'break-all'}}>{fmt(v,cur)}</div>)}</div>}
+        {openCr.length>0&&<div style={{background:'#fffbeb',borderRadius:12,padding:'10px 12px',border:'1.5px solid #fcd34d'}}><div style={{fontSize:10,fontWeight:800,color:'#b45309',textTransform:'uppercase',marginBottom:3}}>Me deben</div>{openCr.map(([cur,v])=><div key={cur} style={{fontSize:15,fontWeight:800,fontFamily:"'Syne',sans-serif",color:'#b45309',wordBreak:'break-all'}}>{fmt(v,cur)}</div>)}</div>}
+        {openDt.length>0&&<div style={{background:'#fff1f2',borderRadius:12,padding:'10px 12px',border:'1.5px solid #fda4af'}}><div style={{fontSize:10,fontWeight:800,color:'#be123c',textTransform:'uppercase',marginBottom:3}}>Les debo</div>{openDt.map(([cur,v])=><div key={cur} style={{fontSize:15,fontWeight:800,fontFamily:"'Syne',sans-serif",color:'#be123c',wordBreak:'break-all'}}>{fmt(Math.abs(v),cur)}</div>)}</div>}
       </div>
       <G2 stack={mobile}><Inp label="Desde" type="date" value={df} onChange={e=>setDf(e.target.value)}/><Inp label="Hasta" type="date" value={dt} onChange={e=>setDt(e.target.value)}/></G2>
       <div style={{overflowX:'auto',borderRadius:12,border:'1.5px solid #e8e8e2'}}>
@@ -757,7 +854,10 @@ function Clientes({accounts,clients,ops,credits,onAddClient,onEditClient,onDelet
       <div style={{display:'grid',gridTemplateColumns:mobile?'1fr':'repeat(auto-fill,minmax(200px,1fr))',gap:10}}>
         {filtered.map(c=>{
           const cOps=clientOps(c.id,ops),profit=cOps.reduce((s,o)=>s+(o.profit||0),0)
-          const creds=cliCreds(c.id,credits),openCr=Object.entries(creds).filter(([,v])=>v>0)
+          const creds=cliCreds(c.id,credits)
+          const openCr=Object.entries(creds).filter(([,v])=>v>0)
+      const openDt=Object.entries(creds).filter(([,v])=>v<0)   // they owe us
+          const openDt=Object.entries(creds).filter(([,v])=>v<0)   // we owe them
           const color=cliColor(c.name)
           return (
             <Card key={c.id} onClick={()=>setSel(c)} style={{borderTop:'4px solid '+color}}>
@@ -775,9 +875,15 @@ function Clientes({accounts,clients,ops,credits,onAddClient,onEditClient,onDelet
                 </div>
               </div>
               {openCr.length>0&&(
-                <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:8,padding:'5px 10px',marginBottom:8}}>
-                  <div style={{fontSize:9,fontWeight:700,color:'#b45309',marginBottom:1}}>DEBE</div>
-                  {openCr.map(([cur,v])=><div key={cur} style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:13,color:'#b45309',wordBreak:'break-all'}}>{fmt(v,cur)+' '+cur}</div>)}
+                <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:8,padding:'5px 10px',marginBottom:4}}>
+                  <div style={{fontSize:9,fontWeight:700,color:'#b45309',marginBottom:1}}>ME DEBEN</div>
+                  {openCr.map(([cur,v])=><div key={cur} style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:13,color:'#b45309',wordBreak:'break-all'}}>{fmt(v,cur)}</div>)}
+                </div>
+              )}
+              {openDt.length>0&&(
+                <div style={{background:'#fff1f2',border:'1px solid #fda4af',borderRadius:8,padding:'5px 10px',marginBottom:4}}>
+                  <div style={{fontSize:9,fontWeight:700,color:'#be123c',marginBottom:1}}>LES DEBO</div>
+                  {openDt.map(([cur,v])=><div key={cur} style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:13,color:'#be123c',wordBreak:'break-all'}}>{fmt(Math.abs(v),cur)}</div>)}
                 </div>
               )}
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 8px',background:'#f8f8f4',borderRadius:8}}>
@@ -998,16 +1104,33 @@ function Reportes({accounts,clients,ops,credits}){
           })}
         </Card>
         <Card>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Créditos abiertos</div>
-          {Object.keys(allCr).length===0
-            ?<div style={{textAlign:'center',padding:'12px 0'}}><div style={{fontSize:22}}>✓</div><div style={{fontSize:12,color:'#888',marginTop:3}}>Sin créditos</div></div>
-            :Object.entries(allCr).map(([cur,v])=>(
-              <div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid #f0f0ea'}}>
-                <Tag bg="#fef9c3" color="#b45309">{cur}</Tag>
-                <span style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:14,color:'#b45309'}}>{fmt(v,cur)}</span>
-              </div>
-            ))
-          }
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,marginBottom:12}}>Posiciones abiertas</div>
+          {(()=>{
+            const creds=allCredByCur(credits)
+            const debts=allDebtsByCur(credits)
+            const hasAny=Object.keys(creds).length>0||Object.keys(debts).length>0
+            if(!hasAny) return <div style={{textAlign:'center',padding:'12px 0'}}><div style={{fontSize:22}}>✓</div><div style={{fontSize:12,color:'#888',marginTop:3}}>Sin posiciones</div></div>
+            return <>
+              {Object.keys(creds).length>0&&<>
+                <div style={{fontSize:10,fontWeight:700,color:'#b45309',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:4}}>Me deben →</div>
+                {Object.entries(creds).map(([cur,v])=>(
+                  <div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid #f0f0ea'}}>
+                    <Tag bg="#fef9c3" color="#b45309">{cur}</Tag>
+                    <span style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:14,color:'#b45309'}}>{fmt(v,cur)}</span>
+                  </div>
+                ))}
+              </>}
+              {Object.keys(debts).length>0&&<>
+                <div style={{fontSize:10,fontWeight:700,color:'#be123c',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:4,marginTop:Object.keys(creds).length>0?10:0}}>← Les debo</div>
+                {Object.entries(debts).map(([cur,v])=>(
+                  <div key={cur} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid #f0f0ea'}}>
+                    <Tag bg="#fff1f2" color="#be123c">{cur}</Tag>
+                    <span style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:14,color:'#be123c'}}>{fmt(Math.abs(v),cur)}</span>
+                  </div>
+                ))}
+              </>}
+            </>
+          })()}
         </Card>
       </div>
 
