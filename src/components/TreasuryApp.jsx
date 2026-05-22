@@ -1001,44 +1001,65 @@ function Clientes({accounts,clients,ops,credits,onAddClient,onEditClient,onDelet
         </div>
       </div>
       {filtered.length===0&&<div style={{color:T.textMuted,fontSize:13,padding:'1rem 0'}}>No hay clientes. Creá el primero ↑</div>}
-      <div style={{display:'grid',gridTemplateColumns:mobile?'1fr':'repeat(auto-fill,minmax(200px,1fr))',gap:10}}>
+      <div style={{display:'grid',gridTemplateColumns:mobile?'1fr 1fr':'repeat(auto-fill,minmax(240px,1fr))',gap:12}}>
         {filtered.map(c=>{
           const cOps=clientOps(c.id,ops)
-          const profit=c.profit  // already computed in useMemo above
+          const profit=c.profit
           const creds=cliCreds(c.id,credits)
-          const openCr=Object.entries(creds).filter(([,v])=>v>0)   // they owe us
-          const openDt=Object.entries(creds).filter(([,v])=>v<0)   // we owe them
+          const openCr=Object.entries(creds).filter(([,v])=>v>0)
+          const openDt=Object.entries(creds).filter(([,v])=>v<0)
           const color=cliColor(c.name)
           return (
-            <Card key={c.id} onClick={()=>setSel(c)} style={{borderTop:'4px solid '+color}}>
-              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:10}}>
-                <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
-                  <div style={{width:34,height:34,borderRadius:'50%',background:color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,fontFamily:"'Syne',sans-serif",flexShrink:0}}>{c.name.slice(0,2)}</div>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontWeight:700,fontSize:14,fontFamily:"'Syne',sans-serif",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</div>
-                    <div style={{fontSize:11,color:T.textSub}}>{cOps.length} operaciones</div>
+            <Card key={c.id} onClick={()=>setSel(c)} style={{borderTop:'4px solid '+color,padding:'14px 16px'}}>
+              {/* Header row: avatar + name + actions */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,gap:8}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0,flex:1}}>
+                  <div style={{width:36,height:36,borderRadius:'50%',background:color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,flexShrink:0}}>
+                    {c.name.slice(0,2).toUpperCase()}
+                  </div>
+                  <div style={{minWidth:0,flex:1}}>
+                    <div style={{
+                      fontWeight:700,fontSize:14,color:T.text,
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                      maxWidth:'100%'
+                    }} title={c.name}>{c.name}</div>
+                    <div style={{fontSize:11,color:T.textMuted,marginTop:1}}>{cOps.length} op{cOps.length!==1?'s':''}</div>
                   </div>
                 </div>
-                <div style={{display:'flex',gap:4,flexShrink:0,marginLeft:8}} onClick={e=>e.stopPropagation()}>
+                <div style={{display:'flex',gap:4,flexShrink:0}} onClick={e=>e.stopPropagation()}>
                   <Btn small onClick={e=>openEdit(c,e)}>✏</Btn>
                   <Btn small danger onClick={e=>{e.stopPropagation();setConfirmId(c.id)}}>🗑</Btn>
                 </div>
               </div>
+
+              {/* Positions */}
               {openCr.length>0&&(
-                <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:8,padding:'5px 10px',marginBottom:4}}>
-                  <div style={{fontSize:9,fontWeight:700,color:'#b45309',marginBottom:1}}>ME DEBEN</div>
-                  {openCr.map(([cur,v])=><div key={cur} style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:13,color:'#b45309',wordBreak:'break-all'}}>{fmt(v,cur)}</div>)}
+                <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:6,padding:'6px 10px',marginBottom:4}}>
+                  <div style={{fontSize:9,fontWeight:700,color:'#b45309',marginBottom:2,textTransform:'uppercase',letterSpacing:'0.04em'}}>Me deben</div>
+                  {openCr.map(([cur,v])=>(
+                    <div key={cur} style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontSize:10,color:'#b45309'}}>{cur}</span>
+                      <span style={{fontWeight:700,fontSize:13,color:'#b45309'}}>{fmt(v,cur)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
               {openDt.length>0&&(
-                <div style={{background:'#fff1f2',border:'1px solid #fda4af',borderRadius:8,padding:'5px 10px',marginBottom:4}}>
-                  <div style={{fontSize:9,fontWeight:700,color:'#be123c',marginBottom:1}}>LES DEBO</div>
-                  {openDt.map(([cur,v])=><div key={cur} style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:13,color:'#be123c',wordBreak:'break-all'}}>{fmt(Math.abs(v),cur)}</div>)}
+                <div style={{background:'#fff1f2',border:'1px solid #fda4af',borderRadius:6,padding:'6px 10px',marginBottom:4}}>
+                  <div style={{fontSize:9,fontWeight:700,color:'#be123c',marginBottom:2,textTransform:'uppercase',letterSpacing:'0.04em'}}>Les debo</div>
+                  {openDt.map(([cur,v])=>(
+                    <div key={cur} style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontSize:10,color:'#be123c'}}>{cur}</span>
+                      <span style={{fontWeight:700,fontSize:13,color:'#be123c'}}>{fmt(Math.abs(v),cur)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 8px',background:T.bgApp,borderRadius:8}}>
-                <span style={{fontSize:10,fontWeight:700,color:T.textSub,textTransform:'uppercase'}}>Profit</span>
-                <span style={{fontWeight:800,fontFamily:"'Syne',sans-serif",fontSize:14,color:profit>=0?'#16a34a':'#dc2626'}}>{(profit>=0?'+':'')+fmt(profit,'USD')}</span>
+
+              {/* Profit bar */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 8px',background:T.bgApp,borderRadius:6,marginTop:openCr.length||openDt.length?4:0}}>
+                <span style={{fontSize:10,fontWeight:600,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.04em'}}>Profit total</span>
+                <span style={{fontWeight:700,fontSize:13,color:profit>=0?T.green:T.red}}>{(profit>=0?'+':'')+fmt(profit,'USD')}</span>
               </div>
             </Card>
           )
