@@ -71,22 +71,22 @@ const T={
 
 // ── UI atoms ──────────────────────────────────────────────────────────────────
 const Card = ({children,style,onClick}) => (
-  <div onClick={onClick} style={{background:T.bgCard,border:,borderRadius:8,padding:'16px 20px',cursor:onClick?'pointer':undefined,...style}}>{children}</div>
+  <div onClick={onClick} style={{background:T.bgCard,border:'1px solid '+T.border,borderRadius:8,padding:'16px 20px',cursor:onClick?'pointer':undefined,...style}}>{children}</div>
 )
 const Btn = ({children,onClick,primary,small,disabled,danger,ghost,style}) => (
-  <button onClick={onClick} disabled={disabled} style={{background:danger?T.redBg:primary?T.accent:ghost?'transparent':'#fff',color:danger?T.red:primary?'#fff':ghost?T.textSub:T.text,border:danger?:primary?'none':ghost?'none':,borderRadius:6,padding:small?'4px 10px':'6px 14px',fontWeight:500,fontSize:small?11:13,fontFamily:"'DM Sans',sans-serif",cursor:disabled?'not-allowed':'pointer',opacity:disabled?.5:1,whiteSpace:'nowrap',letterSpacing:'-0.01em',...style}}>{children}</button>
+  <button onClick={onClick} disabled={disabled} style={{background:danger?T.redBg:primary?T.accent:ghost?'transparent':'#fff',color:danger?T.red:primary?'#fff':ghost?T.textSub:T.text,border:danger?'1px solid '+T.redBorder:primary?'none':ghost?'none':'1px solid '+T.border,,borderRadius:6,padding:small?'4px 10px':'6px 14px',fontWeight:500,fontSize:small?11:13,fontFamily:"'DM Sans',sans-serif",cursor:disabled?'not-allowed':'pointer',opacity:disabled?.5:1,whiteSpace:'nowrap',letterSpacing:'-0.01em',...style}}>{children}</button>
 )
 const Tag = ({children,bg,color,size}) => (
-  <span style={{display:'inline-flex',alignItems:'center',padding:size==='sm'?'1px 6px':'2px 8px',borderRadius:20,fontSize:size==='sm'?10:11,fontWeight:600,background:bg||T.bgApp,color:color||T.textSub,border:,whiteSpace:'nowrap'}}>{children}</span>
+  <span style={{display:'inline-flex',alignItems:'center',padding:size==='sm'?'1px 6px':'2px 8px',borderRadius:20,fontSize:size==='sm'?10:11,fontWeight:600,background:bg||T.bgApp,color:color||T.textSub,border:'1px solid '+T.border,whiteSpace:'nowrap'}}>{children}</span>
 )
 const Fld = ({label,children,hint}) => (
   <div style={{display:'flex',flexDirection:'column',gap:4}}>{label&&<label style={{fontSize:12,fontWeight:500,color:T.textSub}}>{label}</label>}{children}{hint&&<div style={{fontSize:11,color:T.textMuted,marginTop:1}}>{hint}</div>}</div>
 )
 const Inp = ({label,hint,...p}) => (
-  <Fld label={label} hint={hint}><input style={{background:'#fff',border:,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,boxSizing:'border-box',color:T.text,outline:'none'}} {...p}/></Fld>
+  <Fld label={label} hint={hint}><input style={{background:'#fff',border:'1px solid '+T.border,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,boxSizing:'border-box',color:T.text,outline:'none'}} {...p}/></Fld>
 )
 const Sel = ({label,children,...p}) => (
-  <Fld label={label}><select style={{background:'#fff',border:,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,boxSizing:'border-box',color:T.text}} {...p}>{children}</select></Fld>
+  <Fld label={label}><select style={{background:'#fff',border:'1px solid '+T.border,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,boxSizing:'border-box',color:T.text}} {...p}>{children}</select></Fld>
 )
 const G2 = ({children,gap,stack}) => (
   <div style={{display:'grid',gridTemplateColumns:stack?'1fr':'1fr 1fr',gap:gap||12}}>{children}</div>
@@ -948,7 +948,20 @@ function Clientes({accounts,clients,ops,credits,onAddClient,onEditClient,onDelet
   const [confirmId,setConfirmId]=useState(null)
   const [f,sf]=useState({name:'',phone:'',notes:''})
   const [q,setQ]=useState('')
-  const filtered=clients.filter(c=>c.name.toLowerCase().includes(q.toLowerCase()))
+  const [sortBy,setSortBy]=useState('name') // 'name' | 'profit_desc' | 'profit_asc'
+
+  const withProfit = useMemo(()=>clients.map(c=>({
+    ...c,
+    profit: clientOps(c.id,ops).reduce((s,o)=>s+(o.profit||0),0)
+  })),[clients,ops])
+
+  const filtered = useMemo(()=>{
+    let list = withProfit.filter(c=>c.name.toLowerCase().includes(q.toLowerCase()))
+    if(sortBy==='profit_desc') list=[...list].sort((a,b)=>b.profit-a.profit)
+    else if(sortBy==='profit_asc') list=[...list].sort((a,b)=>a.profit-b.profit)
+    else list=[...list].sort((a,b)=>a.name.localeCompare(b.name))
+    return list
+  },[withProfit,q,sortBy])
 
   const openNew = () => { setEditClient(null); sf({name:'',phone:'',notes:''}); setOpen(true) }
   const openEdit = (c,e) => { e.stopPropagation(); setEditClient(c); sf({name:c.name,phone:c.phone||'',notes:c.notes||''}); setOpen(true) }
@@ -964,7 +977,7 @@ function Clientes({accounts,clients,ops,credits,onAddClient,onEditClient,onDelet
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-        <h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:mobile?18:22}}>Clientes</h2>
+        <h2 style={{fontWeight:700,fontSize:mobile?18:22,color:T.text,letterSpacing:'-0.02em'}}>Clientes</h2>
         <Btn primary onClick={openNew}>+ Nuevo</Btn>
       </div>
       <Modal open={open} onClose={()=>{setOpen(false);setEditClient(null)}} title={editClient?'Editar cliente':'Nuevo cliente'}>
@@ -982,11 +995,22 @@ function Clientes({accounts,clients,ops,credits,onAddClient,onEditClient,onDelet
         {sel&&<ClienteDetalle client={sel} ops={ops} accounts={accounts} credits={credits}/>}
       </Modal>
       <Confirm open={!!confirmId} onClose={()=>setConfirmId(null)} onConfirm={()=>onDeleteClient(confirmId)} message="Se eliminará el cliente y todo su historial de créditos."/>
-      <input placeholder="Buscar cliente..." value={q} onChange={e=>setQ(e.target.value)} style={{padding:'8px 12px',border:'1.5px solid #e0e0da',borderRadius:10,fontSize:13,background:'#fff'}}/>
+      {/* Search + sort */}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+        <input placeholder="Buscar cliente..." value={q} onChange={e=>setQ(e.target.value)} style={{flex:1,minWidth:140,padding:'6px 10px',border:'1px solid '+T.border,borderRadius:6,fontSize:13,background:'#fff',color:T.text,outline:'none'}}/>
+        <div style={{display:'flex',gap:4,flexShrink:0}}>
+          {[{k:'name',l:'A–Z'},{k:'profit_desc',l:'↓ Profit'},{k:'profit_asc',l:'↑ Profit'}].map(s=>(
+            <button key={s.k} onClick={()=>setSortBy(s.k)} style={{background:sortBy===s.k?T.text:'#fff',color:sortBy===s.k?'#fff':T.textSub,border:'1px solid '+T.border,borderRadius:6,padding:'5px 10px',cursor:'pointer',fontSize:11,fontWeight:sortBy===s.k?600:400,transition:'all .1s'}}>
+              {s.l}
+            </button>
+          ))}
+        </div>
+      </div>
       {filtered.length===0&&<div style={{color:T.textMuted,fontSize:13,padding:'1rem 0'}}>No hay clientes. Creá el primero ↑</div>}
       <div style={{display:'grid',gridTemplateColumns:mobile?'1fr':'repeat(auto-fill,minmax(200px,1fr))',gap:10}}>
         {filtered.map(c=>{
-          const cOps=clientOps(c.id,ops),profit=cOps.reduce((s,o)=>s+(o.profit||0),0)
+          const cOps=clientOps(c.id,ops)
+          const profit=c.profit  // already computed in useMemo above
           const creds=cliCreds(c.id,credits)
           const openCr=Object.entries(creds).filter(([,v])=>v>0)   // they owe us
           const openDt=Object.entries(creds).filter(([,v])=>v<0)   // we owe them
