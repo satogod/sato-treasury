@@ -268,6 +268,47 @@ function ClientSearch({label, clients, value, onChange, onCreateClient, optional
   )
 }
 
+// Credit transfer: moves credit from one counterpart to another
+// e.g. Batman gave me 32k credit → reduces Batman's debt to me (or increases my debt to him)
+//      AND FOFA receives that 32k credit → she now owes me
+function CreditTransferRow({leg, idx, label, clients, credits, onClientChange, onAmtChange, onCurChange, onRemove, colorScheme}){
+  const bg     = colorScheme==='out' ? '#fff1f2' : '#f0fdf4'
+  const border = colorScheme==='out' ? '#fda4af' : '#86efac'
+  const textC  = colorScheme==='out' ? '#be123c' : '#16a34a'
+  const clientBals = leg.clientId ? cliCreds(leg.clientId, credits) : {}
+  return (
+    <div style={{border:'1px solid '+border,borderRadius:8,padding:'8px 10px',marginBottom:6,background:bg}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+        <span style={{fontSize:10,fontWeight:700,color:textC,textTransform:'uppercase',letterSpacing:'0.04em'}}>{label}</span>
+        {onRemove&&<button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:16}}>×</button>}
+      </div>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <div style={{flex:2,minWidth:120}}>
+          <Fld label="Contraparte">
+            <select value={leg.clientId||''} onChange={e=>onClientChange(idx,e.target.value)}
+              style={{background:'#fff',border:'1px solid '+T.border,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,color:T.text}}>
+              {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Fld>
+        </div>
+        <div style={{flex:1,minWidth:80}}>
+          <Inp label="Monto" type="number" placeholder="0.00" value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
+        </div>
+        <div style={{width:90,flexShrink:0}}>
+          <Sel label="Moneda" value={leg.cur||'USD'} onChange={e=>onCurChange(idx,e.target.value)}>
+            {CURRENCIES.map(c=><option key={c}>{c}</option>)}
+          </Sel>
+        </div>
+      </div>
+      {leg.clientId&&Object.keys(clientBals).length>0&&(
+        <div style={{marginTop:5,fontSize:11,color:textC}}>
+          Posición actual: {Object.entries(clientBals).filter(([,v])=>v!==0).map(([c,v])=>`${v>0?'+':''}${fmt(v,c)}`).join(' · ')||'Sin posición'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Op Form ───────────────────────────────────────────────────────────────────
 // ── Leg row components (defined at module level to avoid focus loss) ───────────
 function AccRow({leg, idx, side, accounts, onAccChange, onAmtChange, onRemove}) {
@@ -352,10 +393,12 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
 
   // Multi-leg state: outs = legs that leave our accounts/create debt
   //                  ins  = legs that enter our accounts/cancel debt
-  const mkOut  = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USDT')?.id||accounts[0]?.id, amt:''})
-  const mkIn   = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USD'&&a.type==='Efectivo')?.id||accounts[0]?.id, amt:''})
-  const mkCred = () => ({id:uid(), kind:'credit',  cur:'USD', amt:''})
-  const mkDebt = () => ({id:uid(), kind:'debt_deduct', clientId:clients[0]?.id||'', cur:'USD', amt:''})
+  const mkOut      = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USDT')?.id||accounts[0]?.id, amt:''})
+  const mkIn       = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USD'&&a.type==='Efectivo')?.id||accounts[0]?.id, amt:''})
+  const mkCred     = () => ({id:uid(), kind:'credit',  cur:'USD', amt:''})
+  const mkDebt     = () => ({id:uid(), kind:'debt_deduct', clientId:clients[0]?.id||'', cur:'USD', amt:''})
+  const mkCreditFrom = () => ({id:uid(), kind:'credit_from', clientId:clients[0]?.id||'', cur:'USD', amt:''})
+  const mkCreditTo   = () => ({id:uid(), kind:'credit_to',   clientId:clients[0]?.id||'', cur:'USD', amt:''})
 
   const initState = () => {
     if(editOp){
@@ -424,7 +467,10 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
         const acc=accounts.find(x=>x.id===o.accId)
         legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:-amt})
       } else if(o.kind==='debt_deduct'){
-        // Reduces the client's credit balance (they "pay" via credit discount)
+        const cli=clients.find(c=>c.id===o.clientId)
+        legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:-amt})
+      } else if(o.kind==='credit_from'){
+        // Credit FROM this person: reduces what they owe us (or increases what we owe them)
         const cli=clients.find(c=>c.id===o.clientId)
         legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:-amt})
       }
@@ -438,6 +484,10 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
       } else if(o.kind==='credit'){
         const cli=clients.find(c=>c.id===s.clientId)
         legs.push({id:uid(),kind:'credit',clientId:s.clientId,clientName:cli?.name,cur:o.cur,delta:amt})
+      } else if(o.kind==='credit_to'){
+        // Credit TO this person: increases what they owe us
+        const cli=clients.find(c=>c.id===o.clientId)
+        legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:amt})
       }
     }
     if(!legs.length){alert('Agregá al menos un movimiento');return}
@@ -468,7 +518,8 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
     {k:'credit_in', icon:'📥',label:'Cobro deuda',   desc:'Salda su deuda'},
     {k:'debt_in',   icon:'📨',label:'Deuda tomada',  desc:'Recibís, quedás debiendo'},
     {k:'debt_pay',  icon:'💸',label:'Pago deuda',    desc:'Pagás lo que debés'},
-    {k:'transfer',  icon:'↔', label:'Transferencia', desc:'Entre tus cuentas'},
+    {k:'transfer',       icon:'↔', label:'Transferencia',       desc:'Entre tus cuentas'},
+    {k:'credit_transfer',icon:'🔄',label:'Traspaso crédito',desc:'Mover deuda entre contrapartes'},
   ]
 
 
@@ -477,7 +528,13 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
       {/* Mode selector */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
         {MODES.map(m=>(
-          <button key={m.k} onClick={()=>setMode(m.k)} style={{background:mode===m.k?T.text:'#f8f8f4',color:mode===m.k?'#fff':T.textSub,border:'1px solid '+(mode===m.k?T.text:T.border),borderRadius:8,padding:'8px 10px',cursor:'pointer',textAlign:'left',transition:'all .1s'}}>
+          <button key={m.k} onClick={()=>{
+            setMode(m.k)
+            // When switching to credit_transfer, reset to two credit legs
+            if(m.k==='credit_transfer'){
+              setS(x=>({...x, outs:[mkCreditFrom()], ins:[mkCreditTo()]}))
+            }
+          }} style={{background:mode===m.k?T.text:'#f8f8f4',color:mode===m.k?'#fff':T.textSub,border:'1px solid '+(mode===m.k?T.text:T.border),borderRadius:8,padding:'8px 10px',cursor:'pointer',textAlign:'left',transition:'all .1s'}}>
             <div style={{fontSize:14,marginBottom:1}}>{m.icon}</div>
             <div style={{fontWeight:600,fontSize:11}}>{m.label}</div>
             <div style={{fontSize:10,opacity:.6}}>{m.desc}</div>
@@ -512,7 +569,65 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
         </div>
       )}
 
-      {/* ── SALIDAS ── */}
+      {/* ── TRASPASO DE CRÉDITO (special mode) ── */}
+      {mode==='credit_transfer'&&(
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          <div style={{background:'#f0f7ff',border:'1px solid #bae6fd',borderRadius:10,padding:'10px 14px',fontSize:12,color:'#0369a1'}}>
+            <strong>Traspaso de crédito:</strong> Movés deuda/crédito de una contraparte a otra, sin que pase dinero por tus cuentas.<br/>
+            <span style={{opacity:.8}}>Ej: Batman te dio crédito de $32k → vos le quedás debiendo a Batman, y FOFA te queda debiendo a vos.</span>
+          </div>
+
+          {/* FROM section — who gives the credit */}
+          <div style={{background:'#fff1f2',border:'1px solid #fda4af',borderRadius:10,padding:'10px 12px'}}>
+            <div style={{fontSize:11,fontWeight:600,color:'#be123c',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
+              ← Crédito que recibís de
+            </div>
+            {s.outs.filter(l=>l.kind==='credit_from').map((leg,i)=>(
+              <CreditTransferRow
+                key={leg.id} leg={leg} idx={s.outs.indexOf(leg)}
+                label="Contraparte que te da crédito"
+                clients={clients} credits={credits}
+                onClientChange={(idx,v)=>setOut(idx,'clientId',v)}
+                onAmtChange={(idx,v)=>setOut(idx,'amt',v)}
+                onCurChange={(idx,v)=>setOut(idx,'cur',v)}
+                onRemove={i>0?rmOut:null}
+                colorScheme="out"
+              />
+            ))}
+            <button onClick={()=>setS(x=>({...x,outs:[...x.outs,mkCreditFrom()]}))} style={{background:'none',border:'1px dashed #fda4af',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:'#be123c',width:'100%'}}>
+              + Agregar contraparte origen
+            </button>
+          </div>
+
+          {/* Arrow */}
+          <div style={{textAlign:'center',fontSize:20,color:T.textMuted}}>↓</div>
+
+          {/* TO section — who receives the credit */}
+          <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:10,padding:'10px 12px'}}>
+            <div style={{fontSize:11,fontWeight:600,color:T.green,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
+              → Crédito que se acredita a
+            </div>
+            {s.ins.filter(l=>l.kind==='credit_to').map((leg,i)=>(
+              <CreditTransferRow
+                key={leg.id} leg={leg} idx={s.ins.indexOf(leg)}
+                label="Contraparte que recibe el crédito"
+                clients={clients} credits={credits}
+                onClientChange={(idx,v)=>setIn(idx,'clientId',v)}
+                onAmtChange={(idx,v)=>setIn(idx,'amt',v)}
+                onCurChange={(idx,v)=>setIn(idx,'cur',v)}
+                onRemove={i>0?rmIn:null}
+                colorScheme="in"
+              />
+            ))}
+            <button onClick={()=>setS(x=>({...x,ins:[...x.ins,mkCreditTo()]}))} style={{background:'none',border:'1px dashed #86efac',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.green,width:'100%'}}>
+              + Agregar contraparte destino
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── SALIDAS / ENTRADAS (standard modes) ── */}
+      {mode!=='credit_transfer'&&<>
       <div style={{background:'#fff5f5',border:'1px solid #fecaca',borderRadius:10,padding:'10px 12px'}}>
         <div style={{fontSize:11,fontWeight:600,color:T.red,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
           📤 Sale / se descuenta
@@ -579,9 +694,10 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
           )}
         </div>
       </div>
+      </> /* end mode!=='credit_transfer' */}
 
       {/* Totals summary */}
-      {(totalOutUSD>0||totalInUSD>0)&&(
+      {mode!=='credit_transfer'&&(totalOutUSD>0||totalInUSD>0)&&(
         <div style={{background:T.bgApp,border:'1px solid '+T.border,borderRadius:8,padding:'10px 12px'}}>
           <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
             <span style={{fontSize:12,color:T.textSub}}>Total salida (USD equiv.)</span>
@@ -773,7 +889,7 @@ function Dashboard({accounts,clients,ops,credits,setTab}){
   const credSumm=useMemo(()=>{const r=[];clients.forEach(c=>{const b=cliCreds(c.id,credits);const d=Object.entries(b).filter(([,v])=>v>0);if(d.length>0)r.push({c,debts:d,type:'credit'})});return r},[clients,credits])
   const debtSumm=useMemo(()=>{const r=[];clients.forEach(c=>{const b=cliCreds(c.id,credits);const d=Object.entries(b).filter(([,v])=>v<0);if(d.length>0)r.push({c,debts:d,type:'debt'})});return r},[clients,credits])
   const accSumm=useMemo(()=>accSumByType(accounts),[accounts])
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.'}
+  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.',credit_transfer:'Traspaso'}
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
@@ -923,8 +1039,8 @@ function Operaciones({accounts,clients,credits,ops,onAddOp,onEditOp,onDeleteOp,o
   const visible=ops.filter(o=>!o.isReversal)
   const filtered=useMemo(()=>[...visible].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).filter(o=>!q||[o.detail,o.clientName].some(s=>(s||'').toLowerCase().includes(q.toLowerCase()))),[visible,q])
   const pages=Math.ceil(filtered.length/PER)||1,paged=filtered.slice((page-1)*PER,page*PER)
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.'}
-  const modeBg={exchange:'#e0f2fe',credit_out:'#fef9c3',credit_in:'#dcfce7',debt_in:'#fdf2f8',debt_pay:'#fff1f2',transfer:'#f5f3ff'}
+  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.',credit_transfer:'Traspaso'}
+  const modeBg={exchange:'#e0f2fe',credit_out:'#fef9c3',credit_in:'#dcfce7',debt_in:'#fdf2f8',debt_pay:'#fff1f2',transfer:'#f5f3ff',credit_transfer:'#f0f7ff'}
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
@@ -1044,7 +1160,7 @@ function ClienteDetalle({client,ops,accounts,credits}){
   const openDt=Object.entries(creds).filter(([,v])=>v<0)
   const inRange=cOps.filter(o=>o.createdAt.slice(0,10)>=df&&o.createdAt.slice(0,10)<=dt)
   const totalP=cOps.reduce((s,o)=>s+(o.profit||0),0)
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.'}
+  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.',credit_transfer:'Traspaso'}
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:10}}>
