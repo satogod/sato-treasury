@@ -421,7 +421,11 @@ function OpForm({accounts, clients, credits, onSubmit, onClose, onCreateClient, 
   const rmIn  = i=>setS(x=>({...x,ins: x.ins.filter((_,j)=>j!==i)}))
   const rmPos = i=>setS(x=>({...x,pos: x.pos.filter((_,j)=>j!==i)}))
 
-  // ── auto profit ────────────────────────────────────────────────────────────
+  // Step-2 confirmation state
+  const [pendingConfirm, setPendingConfirm] = useState(null)
+  // pendingConfirm = { gap: number (USD), accLegs: [] }
+
+  // ── totals ─────────────────────────────────────────────────────────────────
   const totalOutUSD = useMemo(()=>s.outs.reduce((sum,o)=>{
     const a=parseFloat(o.amt)||0
     const cur=accounts.find(x=>x.id===o.accId)?.currency||'USD'
@@ -439,7 +443,6 @@ function OpForm({accounts, clients, credits, onSubmit, onClose, onCreateClient, 
     return +(totalInUSD-totalOutUSD).toFixed(2)
   },[totalOutUSD,totalInUSD])
 
-  // ── auto rate ──────────────────────────────────────────────────────────────
   const autoRate = useMemo(()=>{
     if(s.outs.length!==1||s.ins.length!==1) return null
     const fa=parseFloat(s.outs[0].amt),ta=parseFloat(s.ins[0].amt)
@@ -449,10 +452,9 @@ function OpForm({accounts, clients, credits, onSubmit, onClose, onCreateClient, 
     return calcRate(fa,fc,ta,tc)
   },[s.outs,s.ins,accounts])
 
-  // ── submit ─────────────────────────────────────────────────────────────────
-  const submit = async () => {
+  // ── shared build helpers ───────────────────────────────────────────────────
+  const buildAccLegs = () => {
     const legs=[]
-
     for(const o of s.outs){
       const amt=parseFloat(o.amt)||0; if(!amt) continue
       const acc=accounts.find(x=>x.id===o.accId)
@@ -463,16 +465,16 @@ function OpForm({accounts, clients, credits, onSubmit, onClose, onCreateClient, 
       const acc=accounts.find(x=>x.id===o.accId)
       legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:amt})
     }
-    for(const o of s.pos){
-      const amt=parseFloat(o.amt)||0; if(!amt) continue
-      const cli=clients.find(c=>c.id===o.clientId)
-      // sign +1 → they owe me → positive delta in ledger
-      // sign -1 → I owe them → negative delta in ledger
-      legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:amt*o.sign})
-    }
+    return legs
+  }
 
-    if(!legs.length){alert('Agregá al menos un movimiento');return}
+  const buildPosLegs = (posArr) => posArr.flatMap(o=>{
+    const amt=parseFloat(o.amt)||0; if(!amt) return []
+    const cli=clients.find(c=>c.id===o.clientId)
+    return [{id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:amt*o.sign}]
+  })
 
+  const doSave = async (accLegs, extraPos=[]) => {
     const opId = editOp?editOp.id:uid()
     let attachments = editOp?.attachments||[]
     if(s.files&&s.files.length>0){
@@ -483,20 +485,56 @@ function OpForm({accounts, clients, credits, onSubmit, onClose, onCreateClient, 
         }catch(e){console.warn('Upload failed:',e.message)}
       }
     }
-
+    const allLegs=[...accLegs,...buildPosLegs(s.pos),...buildPosLegs(extraPos)]
     onSubmit({
-      id:opId,
-      createdAt:new Date(s.date).toISOString(),
-      detail:s.detail,
-      mode:s.label,
-      clientId:s.pos[0]?.clientId||s.outs[0]?.clientId||null,
-      clientName:clients.find(c=>c.id===(s.pos[0]?.clientId||s.outs[0]?.clientId))?.name||null,
-      rate:autoRate||parseFloat(s.rate)||null,
-      profit:autoProfit,
-      legs,
-      attachments,
+      id:opId, createdAt:new Date(s.date).toISOString(),
+      detail:s.detail, mode:s.label,
+      clientId:s.pos[0]?.clientId||extraPos[0]?.clientId||null,
+      clientName:clients.find(c=>c.id===(s.pos[0]?.clientId||extraPos[0]?.clientId))?.name||null,
+      rate:autoRate||parseFloat(s.rate)||null, profit:autoProfit,
+      legs:allLegs, attachments,
     }, editOp)
     onClose()
+  }
+
+  // ── submit (step 1) ────────────────────────────────────────────────────────
+  const submit = async () => {
+    const accLegs = buildAccLegs()
+    if(!accLegs.length && s.pos.length===0){
+      alert('Agregá al menos un movimiento'); return
+    }
+    const gap = totalInUSD - totalOutUSD
+    const hasPosLegs = s.pos.some(p=>parseFloat(p.amt)>0)
+    const hasAccMovement = totalOutUSD>0||totalInUSD>0
+    // Show step-2 confirmation only when there's an account-level gap and no positions yet
+    if(hasAccMovement && !hasPosLegs && Math.abs(gap)>0.50){
+      setPendingConfirm({gap, accLegs})
+      return
+    }
+    await doSave(accLegs)
+  }
+
+  // ── step-2 handlers ────────────────────────────────────────────────────────
+  const confirmSkip = async () => {
+    await doSave(pendingConfirm.accLegs)
+    setPendingConfirm(null)
+  }
+
+  const confirmAddPos = () => {
+    const {gap} = pendingConfirm
+    const sign = gap>0 ? 1 : -1
+    // Guess currency from the "giving" side
+    const givingSide = gap<0 ? s.outs : s.ins
+    const guessAcc = accounts.find(x=>x.id===givingSide[0]?.accId)
+    const guessCur = guessAcc?.currency||'USD'
+    setS(x=>({...x, pos:[...x.pos,{
+      id:uid(), kind:'credit',
+      clientId:clients[0]?.id||'',
+      cur:guessCur,
+      amt:String(Math.abs(gap).toFixed(2)),
+      sign,
+    }]}))
+    setPendingConfirm(null)
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -665,9 +703,39 @@ function OpForm({accounts, clients, credits, onSubmit, onClose, onCreateClient, 
       <div style={{fontSize:10,color:T.textMuted,textAlign:'center'}}>
         Ref: 1 USDT=$1 · 1 EUR=$1.08 · ₲6,200=$1 · R$5.1=$1
       </div>
+
+      {/* ── Step-2: pending confirmation banner ── */}
+      {pendingConfirm&&(
+        <div style={{background:'#fff8c5',border:'2px solid #d4a72c',borderRadius:12,padding:'14px 16px'}}>
+          <div style={{fontWeight:700,fontSize:14,color:'#9a6700',marginBottom:6}}>
+            ⚠️ Quedó una diferencia sin registrar
+          </div>
+          <div style={{fontSize:13,color:'#b45309',marginBottom:10}}>
+            {pendingConfirm.gap>0
+              ? <>Entró <strong>{fmt(Math.abs(pendingConfirm.gap),'USD')}</strong> más de lo que salió — ¿le acreditás ese monto a alguien?</>
+              : <>Salió <strong>{fmt(Math.abs(pendingConfirm.gap),'USD')}</strong> más de lo que entró — ¿alguien te quedó debiendo ese monto?</>
+            }
+          </div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            <button onClick={confirmAddPos}
+              style={{flex:1,background:'#b45309',color:'#fff',border:'none',borderRadius:8,
+                padding:'9px 14px',cursor:'pointer',fontWeight:600,fontSize:13}}>
+              Sí, registrar posición pendiente
+            </button>
+            <button onClick={confirmSkip}
+              style={{flex:1,background:'#fff',color:'#9a6700',border:'1px solid #d4a72c',
+                borderRadius:8,padding:'9px 14px',cursor:'pointer',fontWeight:600,fontSize:13}}>
+              No, el pago fue completo
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{display:'flex',gap:8,justifyContent:'flex-end',paddingTop:4}}>
         <Btn onClick={onClose}>Cancelar</Btn>
-        <Btn primary onClick={submit}>{editOp?'Guardar cambios':'Registrar'}</Btn>
+        <Btn primary onClick={submit} disabled={!!pendingConfirm}>
+          {editOp?'Guardar cambios':'Registrar'}
+        </Btn>
       </div>
     </div>
   )
