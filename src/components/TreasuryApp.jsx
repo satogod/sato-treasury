@@ -268,473 +268,387 @@ function ClientSearch({label, clients, value, onChange, onCreateClient, optional
   )
 }
 
-// Credit transfer: moves credit from one counterpart to another
-// e.g. Batman gave me 32k credit → reduces Batman's debt to me (or increases my debt to him)
-//      AND FOFA receives that 32k credit → she now owes me
-function CreditTransferRow({leg, idx, label, clients, credits, onClientChange, onAmtChange, onCurChange, onRemove, colorScheme}){
-  const bg     = colorScheme==='out' ? '#fff1f2' : '#f0fdf4'
-  const border = colorScheme==='out' ? '#fda4af' : '#86efac'
-  const textC  = colorScheme==='out' ? '#be123c' : '#16a34a'
-  const clientBals = leg.clientId ? cliCreds(leg.clientId, credits) : {}
-  return (
-    <div style={{border:'1px solid '+border,borderRadius:8,padding:'8px 10px',marginBottom:6,background:bg}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-        <span style={{fontSize:10,fontWeight:700,color:textC,textTransform:'uppercase',letterSpacing:'0.04em'}}>{label}</span>
-        {onRemove&&<button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:16}}>×</button>}
-      </div>
-      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-        <div style={{flex:2,minWidth:120}}>
-          <Fld label="Contraparte">
-            <select value={leg.clientId||''} onChange={e=>onClientChange(idx,e.target.value)}
-              style={{background:'#fff',border:'1px solid '+T.border,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,color:T.text}}>
-              {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </Fld>
-        </div>
-        <div style={{flex:1,minWidth:80}}>
-          <Inp label="Monto" type="number" placeholder="0.00" value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
-        </div>
-        <div style={{width:90,flexShrink:0}}>
-          <Sel label="Moneda" value={leg.cur||'USD'} onChange={e=>onCurChange(idx,e.target.value)}>
-            {CURRENCIES.map(c=><option key={c}>{c}</option>)}
-          </Sel>
-        </div>
-      </div>
-      {leg.clientId&&Object.keys(clientBals).length>0&&(
-        <div style={{marginTop:5,fontSize:11,color:textC}}>
-          Posición actual: {Object.entries(clientBals).filter(([,v])=>v!==0).map(([c,v])=>`${v>0?'+':''}${fmt(v,c)}`).join(' · ')||'Sin posición'}
-        </div>
-      )}
-    </div>
-  )
-}
+// ── Refactored OpForm — free-form legs, no mode logic ────────────────────────
+//
+// Three independent sections:
+//   outs  : money leaving my accounts     {kind:'account', accId, amt}
+//   ins   : money entering my accounts    {kind:'account', accId, amt}
+//   pos   : credit/debit with counterpart {kind:'credit', clientId, cur, amt, sign: +1|-1}
+//             sign +1  = they owe me (my asset)
+//             sign -1  = I owe them (my liability)
+//
+// mode is now just a free label (no logic depends on it)
 
-// ── Op Form ───────────────────────────────────────────────────────────────────
-// ── Leg row components (defined at module level to avoid focus loss) ───────────
-function AccRow({leg, idx, side, accounts, onAccChange, onAmtChange, onRemove}) {
+// ── Leg row components (module-level to avoid focus loss on re-render) ────────
+
+function AccLegRow({leg, idx, side, accounts, onAccChange, onAmtChange, onRemove}) {
   return (
-    <div style={{display:'flex',gap:8,alignItems:'flex-end',padding:'8px',background:side==='out'?'#fff5f5':'#f0fdf4',borderRadius:8,marginBottom:6}}>
-      <div style={{flex:2}}>
+    <div style={{display:'flex',gap:8,alignItems:'flex-end',padding:'8px 10px',
+      background:side==='out'?'#fff5f5':'#f0fdf4',borderRadius:8,marginBottom:6}}>
+      <div style={{flex:2,minWidth:0}}>
         <AccSearch
-          label={idx===0?(side==='out'?'Cuenta origen':'Cuenta destino'):''}
+          label={idx===0?(side==='out'?'Sale de':'Entra a'):''}
           accounts={accounts} value={leg.accId}
           onChange={v=>onAccChange(idx,v)}
         />
       </div>
-      <div style={{flex:1}}>
-        <Inp
-          label={idx===0?'Monto':''}
-          type="number" placeholder="0.00"
-          value={leg.amt}
-          onChange={e=>onAmtChange(idx,e.target.value)}
-        />
+      <div style={{flex:1,minWidth:70}}>
+        <Inp label={idx===0?'Monto':''} type="number" placeholder="0.00"
+          value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
       </div>
-      {onRemove&&<button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0}}>×</button>}
-      {!onRemove&&<div style={{width:22,flexShrink:0}}/>}
+      <button onClick={()=>onRemove(idx)}
+        style={{background:'none',border:'none',cursor:'pointer',
+          color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0,
+          opacity:idx===0?.3:1}} disabled={idx===0}>×</button>
     </div>
   )
 }
 
-function CredRow({leg, idx, onAmtChange, onCurChange, onRemove}) {
+function PosLegRow({leg, idx, clients, credits, onClientChange, onAmtChange, onCurChange, onSignChange, onRemove}) {
+  const bals = leg.clientId ? cliCreds(leg.clientId, credits) : {}
+  const hasPos = Object.entries(bals).some(([,v])=>v!==0)
   return (
-    <div style={{display:'flex',gap:8,alignItems:'flex-end',padding:'8px',background:'#fffbeb',borderRadius:8,marginBottom:6}}>
-      <div style={{flex:1}}>
-        <Inp label={idx===0?'Monto crédito':''} type="number" placeholder="0.00" value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
-      </div>
-      <div style={{width:110,flexShrink:0}}>
-        <Sel label={idx===0?'Moneda':''} value={leg.cur||'USD'} onChange={e=>onCurChange(idx,e.target.value)}>
-          {CURRENCIES.map(c=><option key={c}>{c}</option>)}
-        </Sel>
-      </div>
-      <button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0}}>×</button>
-    </div>
-  )
-}
-
-// Credit-deduction row: reduces an existing credit balance (they pay us via credit discount)
-function CreditDeductRow({leg, idx, clients, credits, onClientChange, onAmtChange, onCurChange, onRemove}) {
-  const clientBals = leg.clientId ? cliCreds(leg.clientId, credits) : {}
-  const availCurs  = Object.entries(clientBals).filter(([,v])=>v>0).map(([c])=>c)
-  return (
-    <div style={{border:'1px solid #fcd34d',borderRadius:8,padding:'8px 10px',marginBottom:6,background:'#fffbeb'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-        <span style={{fontSize:10,fontWeight:700,color:'#b45309',textTransform:'uppercase',letterSpacing:'0.04em'}}>💳 Descuento de deuda del cliente</span>
-        <button onClick={()=>onRemove(idx)} style={{background:'none',border:'none',cursor:'pointer',color:T.textMuted,fontSize:16}}>×</button>
-      </div>
-      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+    <div style={{border:'1px solid '+(leg.sign>0?'#fcd34d':'#fda4af'),
+      borderRadius:8,padding:'8px 10px',marginBottom:6,
+      background:leg.sign>0?'#fffbeb':'#fff1f2'}}>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'flex-end'}}>
+        {/* Sign toggle */}
+        <div style={{flexShrink:0}}>
+          {idx===0&&<label style={{fontSize:12,fontWeight:500,color:T.textSub,display:'block',marginBottom:4}}>Dirección</label>}
+          <div style={{display:'flex',border:'1px solid '+T.border,borderRadius:6,overflow:'hidden'}}>
+            <button onClick={()=>onSignChange(idx,1)}
+              style={{padding:'6px 10px',border:'none',cursor:'pointer',fontSize:11,fontWeight:600,
+                background:leg.sign>0?'#b45309':'#fff',color:leg.sign>0?'#fff':'#888'}}>
+              Me deben
+            </button>
+            <button onClick={()=>onSignChange(idx,-1)}
+              style={{padding:'6px 10px',border:'none',cursor:'pointer',fontSize:11,fontWeight:600,
+                background:leg.sign<0?'#be123c':'#fff',color:leg.sign<0?'#fff':'#888'}}>
+              Les debo
+            </button>
+          </div>
+        </div>
+        {/* Client */}
         <div style={{flex:2,minWidth:120}}>
-          <Fld label="Cliente">
-            <select value={leg.clientId||''} onChange={e=>onClientChange(idx,e.target.value)} style={{background:'#fff',border:'1px solid '+T.border,borderRadius:6,padding:'6px 10px',width:'100%',fontSize:13,color:T.text}}>
+          <Fld label={idx===0?'Contraparte':''}>
+            <select value={leg.clientId||''} onChange={e=>onClientChange(idx,e.target.value)}
+              style={{background:'#fff',border:'1px solid '+T.border,borderRadius:6,
+                padding:'6px 10px',width:'100%',fontSize:13,color:T.text}}>
               {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Fld>
         </div>
+        {/* Amount */}
         <div style={{flex:1,minWidth:80}}>
-          <Inp label="Monto a descontar" type="number" placeholder="0.00" value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
+          <Inp label={idx===0?'Monto':''} type="number" placeholder="0.00"
+            value={leg.amt} onChange={e=>onAmtChange(idx,e.target.value)}/>
         </div>
-        <div style={{width:90,flexShrink:0}}>
-          <Sel label="Moneda" value={leg.cur||'USD'} onChange={e=>onCurChange(idx,e.target.value)}>
-            {(availCurs.length>0?availCurs:CURRENCIES).map(c=><option key={c}>{c}</option>)}
+        {/* Currency */}
+        <div style={{width:80,flexShrink:0}}>
+          <Sel label={idx===0?'Moneda':''} value={leg.cur||'USD'} onChange={e=>onCurChange(idx,e.target.value)}>
+            {CURRENCIES.map(c=><option key={c}>{c}</option>)}
           </Sel>
         </div>
+        <button onClick={()=>onRemove(idx)}
+          style={{background:'none',border:'none',cursor:'pointer',
+            color:T.textMuted,fontSize:18,paddingBottom:4,flexShrink:0}}>×</button>
       </div>
-      {leg.clientId&&Object.keys(clientBals).length>0&&(
-        <div style={{marginTop:6,fontSize:11,color:'#b45309'}}>
-          Saldo disponible: {Object.entries(clientBals).filter(([,v])=>v>0).map(([c,v])=>fmt(v,c)).join(' · ')}
+      {/* Current position hint */}
+      {leg.clientId&&hasPos&&(
+        <div style={{marginTop:5,fontSize:11,color:leg.sign>0?'#b45309':'#be123c',display:'flex',gap:8,flexWrap:'wrap'}}>
+          <span style={{fontWeight:600}}>Posición actual:</span>
+          {Object.entries(bals).filter(([,v])=>v!==0).map(([c,v])=>(
+            <span key={c}>{v>0?'+':''}{fmt(v,c)} <span style={{opacity:.6}}>{v>0?'(te deben)':'(les debés)'}</span></span>
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp}){
+function OpForm({accounts, clients, credits, onSubmit, onClose, onCreateClient, editOp}) {
   const mobile = useIsMobile()
-  const [mode,setMode] = useState(editOp?.mode||'exchange')
 
-  // Multi-leg state: outs = legs that leave our accounts/create debt
-  //                  ins  = legs that enter our accounts/cancel debt
-  const mkOut      = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USDT')?.id||accounts[0]?.id, amt:''})
-  const mkIn       = () => ({id:uid(), kind:'account', accId:accounts.find(a=>a.currency==='USD'&&a.type==='Efectivo')?.id||accounts[0]?.id, amt:''})
-  const mkCred     = () => ({id:uid(), kind:'credit',  cur:'USD', amt:''})
-  const mkDebt     = () => ({id:uid(), kind:'debt_deduct', clientId:clients[0]?.id||'', cur:'USD', amt:''})
-  const mkCreditFrom = () => ({id:uid(), kind:'credit_from', clientId:clients[0]?.id||'', cur:'USD', amt:''})
-  const mkCreditTo   = () => ({id:uid(), kind:'credit_to',   clientId:clients[0]?.id||'', cur:'USD', amt:''})
+  // ── helpers ────────────────────────────────────────────────────────────────
+  const defOut = () => ({id:uid(), kind:'account',
+    accId: accounts.find(a=>a.currency==='USDT')?.id||accounts[0]?.id, amt:''})
+  const defIn  = () => ({id:uid(), kind:'account',
+    accId: accounts.find(a=>a.currency==='USD'&&a.type==='Efectivo')?.id||accounts[0]?.id, amt:''})
+  const defPos = () => ({id:uid(), kind:'credit',
+    clientId: clients[0]?.id||'', cur:'USD', amt:'', sign:1})
 
-  const initState = () => {
-    if(editOp){
-      const outLegs = editOp.legs?.filter(l=>l.delta<0)||[]
-      const inLegs  = editOp.legs?.filter(l=>l.delta>0)||[]
+  // ── init from editOp ────────────────────────────────────────────────────────
+  const init = () => {
+    if(editOp) {
+      const outLegs = (editOp.legs||[]).filter(l=>l.kind==='account'&&l.delta<0)
+      const inLegs  = (editOp.legs||[]).filter(l=>l.kind==='account'&&l.delta>0)
+      const posLegs = (editOp.legs||[]).filter(l=>l.kind==='credit')
       return {
-        date: editOp.createdAt.slice(0,16),
-        clientId: editOp.clientId||'',
-        detail: editOp.detail||'',
-        rate: editOp.rate?String(editOp.rate):'',
-        outs: outLegs.map(l=>({id:uid(), kind:l.kind, accId:l.accId||'', cur:l.cur, amt:String(Math.abs(l.delta))})),
-        ins:  inLegs.map(l=>({id:uid(), kind:l.kind, accId:l.accId||'', cur:l.cur, clientId:l.clientId||'', clientName:l.clientName||'', amt:String(l.delta)})),
+        date:     editOp.createdAt.slice(0,16),
+        label:    editOp.mode||'exchange',
+        detail:   editOp.detail||'',
+        rate:     editOp.rate?String(editOp.rate):'',
+        files:    [],
+        outs: outLegs.map(l=>({id:uid(),kind:'account',accId:l.accId,amt:String(Math.abs(l.delta))})),
+        ins:  inLegs.map(l=>({id:uid(),kind:'account',accId:l.accId,amt:String(l.delta)})),
+        pos:  posLegs.map(l=>({id:uid(),kind:'credit',clientId:l.clientId,clientName:l.clientName,cur:l.cur,amt:String(Math.abs(l.delta)),sign:l.delta>0?1:-1})),
       }
     }
     return {
-      date: nowUTC3(),
-      clientId: clients[0]?.id||'',
+      date:   nowUTC3(),
+      label:  'exchange',
       detail: '',
-      rate: '',
-      files: [],
-      outs: [mkOut()],
-      ins:  [mkIn()],
+      rate:   '',
+      files:  [],
+      outs:   [defOut()],
+      ins:    [defIn()],
+      pos:    [],
     }
   }
 
-  const [s,setS] = useState(initState)
+  const [s, setS] = useState(init)
   const set = (k,v) => setS(x=>({...x,[k]:v}))
 
-  const setOut = (idx,k,v) => setS(x=>({...x, outs:x.outs.map((o,i)=>i===idx?{...o,[k]:v}:o)}))
-  const setIn  = (idx,k,v) => setS(x=>({...x, ins:x.ins.map((o,i)=>i===idx?{...o,[k]:v}:o)}))
-  const addOut = () => setS(x=>({...x, outs:[...x.outs, mkOut()]}))
-  const addIn  = () => setS(x=>({...x, ins:[...x.ins, mkIn()]}))
-  const addInCred = () => setS(x=>({...x, ins:[...x.ins, mkCred()]}))
-  const addInDebt = () => setS(x=>({...x, outs:[...x.outs, mkDebt()]}))
-  const rmOut  = (idx) => setS(x=>({...x, outs:x.outs.filter((_,i)=>i!==idx)}))
-  const rmIn   = (idx) => setS(x=>({...x, ins:x.ins.filter((_,i)=>i!==idx)}))
+  const setOut = (i,k,v) => setS(x=>({...x,outs:x.outs.map((o,j)=>j===i?{...o,[k]:v}:o)}))
+  const setIn  = (i,k,v) => setS(x=>({...x,ins: x.ins.map((o,j)=>j===i?{...o,[k]:v}:o)}))
+  const setPos = (i,k,v) => setS(x=>({...x,pos: x.pos.map((o,j)=>j===i?{...o,[k]:v}:o)}))
 
-  const client = clients.find(c=>c.id===s.clientId)
-  const existCreds = useMemo(()=>s.clientId?cliCreds(s.clientId,credits):{},[s.clientId,credits])
+  const addOut = ()=>setS(x=>({...x,outs:[...x.outs,defOut()]}))
+  const addIn  = ()=>setS(x=>({...x,ins: [...x.ins, defIn()]}))
+  const addPos = ()=>setS(x=>({...x,pos: [...x.pos, defPos()]}))
 
-  // Total out in USD / total in in USD for profit
+  const rmOut = i=>setS(x=>({...x,outs:x.outs.filter((_,j)=>j!==i)}))
+  const rmIn  = i=>setS(x=>({...x,ins: x.ins.filter((_,j)=>j!==i)}))
+  const rmPos = i=>setS(x=>({...x,pos: x.pos.filter((_,j)=>j!==i)}))
+
+  // ── auto profit ────────────────────────────────────────────────────────────
   const totalOutUSD = useMemo(()=>s.outs.reduce((sum,o)=>{
     const a=parseFloat(o.amt)||0
-    const acc=accounts.find(x=>x.id===o.accId)
-    return sum+toUSD(a,acc?.currency||'USD')
+    const cur=accounts.find(x=>x.id===o.accId)?.currency||'USD'
+    return sum+toUSD(a,cur)
   },0),[s.outs,accounts])
 
   const totalInUSD = useMemo(()=>s.ins.reduce((sum,o)=>{
     const a=parseFloat(o.amt)||0
-    const cur=o.kind==='credit'?o.cur:(accounts.find(x=>x.id===o.accId)?.currency||'USD')
+    const cur=accounts.find(x=>x.id===o.accId)?.currency||'USD'
     return sum+toUSD(a,cur)
   },0),[s.ins,accounts])
 
   const autoProfit = useMemo(()=>{
-    if(mode==='transfer') return null
     if(!totalOutUSD&&!totalInUSD) return null
     return +(totalInUSD-totalOutUSD).toFixed(2)
-  },[totalOutUSD,totalInUSD,mode])
+  },[totalOutUSD,totalInUSD])
 
+  // ── auto rate ──────────────────────────────────────────────────────────────
+  const autoRate = useMemo(()=>{
+    if(s.outs.length!==1||s.ins.length!==1) return null
+    const fa=parseFloat(s.outs[0].amt),ta=parseFloat(s.ins[0].amt)
+    const fc=accounts.find(x=>x.id===s.outs[0].accId)?.currency||'USD'
+    const tc=accounts.find(x=>x.id===s.ins[0].accId)?.currency||'USD'
+    if(!fa||!ta||fc===tc) return null
+    return calcRate(fa,fc,ta,tc)
+  },[s.outs,s.ins,accounts])
+
+  // ── submit ─────────────────────────────────────────────────────────────────
   const submit = async () => {
-    const legs = []
+    const legs=[]
+
     for(const o of s.outs){
-      const amt=parseFloat(o.amt)||0
-      if(!amt) continue
-      if(o.kind==='account'){
-        const acc=accounts.find(x=>x.id===o.accId)
-        legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:-amt})
-      } else if(o.kind==='debt_deduct'){
-        const cli=clients.find(c=>c.id===o.clientId)
-        legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:-amt})
-      } else if(o.kind==='credit_from'){
-        // Credit FROM this person: reduces what they owe us (or increases what we owe them)
-        const cli=clients.find(c=>c.id===o.clientId)
-        legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:-amt})
-      }
+      const amt=parseFloat(o.amt)||0; if(!amt) continue
+      const acc=accounts.find(x=>x.id===o.accId)
+      legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:-amt})
     }
     for(const o of s.ins){
-      const amt=parseFloat(o.amt)||0
-      if(!amt) continue
-      if(o.kind==='account'){
-        const acc=accounts.find(x=>x.id===o.accId)
-        legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:amt})
-      } else if(o.kind==='credit'){
-        const cli=clients.find(c=>c.id===s.clientId)
-        legs.push({id:uid(),kind:'credit',clientId:s.clientId,clientName:cli?.name,cur:o.cur,delta:amt})
-      } else if(o.kind==='credit_to'){
-        // Credit TO this person: increases what they owe us
-        const cli=clients.find(c=>c.id===o.clientId)
-        legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:amt})
-      }
+      const amt=parseFloat(o.amt)||0; if(!amt) continue
+      const acc=accounts.find(x=>x.id===o.accId)
+      legs.push({id:uid(),kind:'account',accId:o.accId,cur:acc?.currency,delta:amt})
     }
+    for(const o of s.pos){
+      const amt=parseFloat(o.amt)||0; if(!amt) continue
+      const cli=clients.find(c=>c.id===o.clientId)
+      // sign +1 → they owe me → positive delta in ledger
+      // sign -1 → I owe them → negative delta in ledger
+      legs.push({id:uid(),kind:'credit',clientId:o.clientId,clientName:cli?.name,cur:o.cur,delta:amt*o.sign})
+    }
+
     if(!legs.length){alert('Agregá al menos un movimiento');return}
+
     const opId = editOp?editOp.id:uid()
-    // Upload new files
     let attachments = editOp?.attachments||[]
     if(s.files&&s.files.length>0){
       for(const file of s.files){
         try{
-          const path = await uploadAttachment(file, opId)
-          attachments = [...attachments, {path, name:file.name, size:file.size}]
-        }catch(e){ console.warn('Upload failed:',e.message) }
+          const path = await uploadAttachment(file,opId)
+          attachments=[...attachments,{path,name:file.name,size:file.size}]
+        }catch(e){console.warn('Upload failed:',e.message)}
       }
     }
+
     onSubmit({
       id:opId,
       createdAt:new Date(s.date).toISOString(),
-      detail:s.detail, mode,
-      clientId:s.clientId||null, clientName:clients.find(c=>c.id===s.clientId)?.name||null,
-      rate:parseFloat(s.rate)||null, profit:autoProfit, legs, attachments
-    },editOp)
+      detail:s.detail,
+      mode:s.label,
+      clientId:s.pos[0]?.clientId||s.outs[0]?.clientId||null,
+      clientName:clients.find(c=>c.id===(s.pos[0]?.clientId||s.outs[0]?.clientId))?.name||null,
+      rate:autoRate||parseFloat(s.rate)||null,
+      profit:autoProfit,
+      legs,
+      attachments,
+    }, editOp)
     onClose()
   }
 
-  const MODES = [
-    {k:'exchange',  icon:'⇄', label:'Cambio',       desc:'Pago en el momento'},
-    {k:'credit_out',icon:'📤',label:'Crédito dado',  desc:'Te queda debiendo'},
-    {k:'credit_in', icon:'📥',label:'Cobro deuda',   desc:'Salda su deuda'},
-    {k:'debt_in',   icon:'📨',label:'Deuda tomada',  desc:'Recibís, quedás debiendo'},
-    {k:'debt_pay',  icon:'💸',label:'Pago deuda',    desc:'Pagás lo que debés'},
-    {k:'transfer',       icon:'↔', label:'Transferencia',       desc:'Entre tus cuentas'},
-    {k:'credit_transfer',icon:'🔄',label:'Traspaso crédito',desc:'Mover deuda entre contrapartes'},
+  // ── render ─────────────────────────────────────────────────────────────────
+  const LABELS = [
+    {k:'exchange',  icon:'⇄', label:'Cambio'},
+    {k:'transfer',  icon:'↔', label:'Transferencia'},
+    {k:'credit_transfer',icon:'🔄',label:'Traspaso crédito'},
+    {k:'other',     icon:'📝',label:'Otro'},
   ]
 
-
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      {/* Mode selector */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
-        {MODES.map(m=>(
-          <button key={m.k} onClick={()=>{
-            setMode(m.k)
-            // When switching to credit_transfer, reset to two credit legs
-            if(m.k==='credit_transfer'){
-              setS(x=>({...x, outs:[mkCreditFrom()], ins:[mkCreditTo()]}))
-            }
-          }} style={{background:mode===m.k?T.text:'#f8f8f4',color:mode===m.k?'#fff':T.textSub,border:'1px solid '+(mode===m.k?T.text:T.border),borderRadius:8,padding:'8px 10px',cursor:'pointer',textAlign:'left',transition:'all .1s'}}>
-            <div style={{fontSize:14,marginBottom:1}}>{m.icon}</div>
-            <div style={{fontWeight:600,fontSize:11}}>{m.label}</div>
-            <div style={{fontSize:10,opacity:.6}}>{m.desc}</div>
-          </button>
-        ))}
+    <div style={{display:'flex',flexDirection:'column',gap:14}}>
+
+      {/* Label selector — purely descriptive */}
+      <div>
+        <div style={{fontSize:12,fontWeight:500,color:T.textSub,marginBottom:6}}>Tipo de operación</div>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {LABELS.map(m=>(
+            <button key={m.k} onClick={()=>set('label',m.k)}
+              style={{background:s.label===m.k?T.text:'#fff',color:s.label===m.k?'#fff':T.textSub,
+                border:'1px solid '+(s.label===m.k?T.text:T.border),
+                borderRadius:6,padding:'5px 12px',cursor:'pointer',fontSize:12,fontWeight:500,
+                display:'flex',alignItems:'center',gap:4}}>
+              {m.icon} {m.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <Divider/>
 
       <Inp label="Fecha y hora" type="datetime-local" value={s.date} onChange={e=>set('date',e.target.value)}/>
 
-      {/* Client selector (most modes need it) */}
-      {mode!=='transfer'&&(
-        <ClientSearch
-          label={mode==='exchange'?'Cliente contraparte (opcional)':'Cliente / Corresponsal'}
-          clients={clients} value={s.clientId}
-          onChange={v=>set('clientId',v)}
-          onCreateClient={onCreateClient}
-          optional={mode==='exchange'}
-        />
-      )}
-
-      {/* Show existing positions for this client */}
-      {s.clientId&&(Object.entries(existCreds).some(([,v])=>v!==0))&&(
-        <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:8,padding:'8px 12px',fontSize:12}}>
-          <div style={{fontWeight:600,marginBottom:4,color:'#b45309'}}>Posición actual con {client?.name}:</div>
-          {Object.entries(existCreds).filter(([,v])=>v!==0).map(([c,v])=>(
-            <div key={c} style={{display:'flex',justifyContent:'space-between'}}>
-              <span style={{color:T.textSub}}>{c}</span>
-              <span style={{fontWeight:600,color:v>0?'#b45309':'#be123c'}}>{v>0?'+':''}{fmt(v,c)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── TRASPASO DE CRÉDITO (special mode) ── */}
-      {mode==='credit_transfer'&&(
-        <div style={{display:'flex',flexDirection:'column',gap:8}}>
-          <div style={{background:'#f0f7ff',border:'1px solid #bae6fd',borderRadius:10,padding:'10px 14px',fontSize:12,color:'#0369a1'}}>
-            <strong>Traspaso de crédito:</strong> Movés deuda/crédito de una contraparte a otra, sin que pase dinero por tus cuentas.<br/>
-            <span style={{opacity:.8}}>Ej: Batman te dio crédito de $32k → vos le quedás debiendo a Batman, y FOFA te queda debiendo a vos.</span>
-          </div>
-
-          {/* FROM section — who gives the credit */}
-          <div style={{background:'#fff1f2',border:'1px solid #fda4af',borderRadius:10,padding:'10px 12px'}}>
-            <div style={{fontSize:11,fontWeight:600,color:'#be123c',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
-              ← Crédito que recibís de
-            </div>
-            {s.outs.filter(l=>l.kind==='credit_from').map((leg,i)=>(
-              <CreditTransferRow
-                key={leg.id} leg={leg} idx={s.outs.indexOf(leg)}
-                label="Contraparte que te da crédito"
-                clients={clients} credits={credits}
-                onClientChange={(idx,v)=>setOut(idx,'clientId',v)}
-                onAmtChange={(idx,v)=>setOut(idx,'amt',v)}
-                onCurChange={(idx,v)=>setOut(idx,'cur',v)}
-                onRemove={i>0?rmOut:null}
-                colorScheme="out"
-              />
-            ))}
-            <button onClick={()=>setS(x=>({...x,outs:[...x.outs,mkCreditFrom()]}))} style={{background:'none',border:'1px dashed #fda4af',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:'#be123c',width:'100%'}}>
-              + Agregar contraparte origen
-            </button>
-          </div>
-
-          {/* Arrow */}
-          <div style={{textAlign:'center',fontSize:20,color:T.textMuted}}>↓</div>
-
-          {/* TO section — who receives the credit */}
-          <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:10,padding:'10px 12px'}}>
-            <div style={{fontSize:11,fontWeight:600,color:T.green,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
-              → Crédito que se acredita a
-            </div>
-            {s.ins.filter(l=>l.kind==='credit_to').map((leg,i)=>(
-              <CreditTransferRow
-                key={leg.id} leg={leg} idx={s.ins.indexOf(leg)}
-                label="Contraparte que recibe el crédito"
-                clients={clients} credits={credits}
-                onClientChange={(idx,v)=>setIn(idx,'clientId',v)}
-                onAmtChange={(idx,v)=>setIn(idx,'amt',v)}
-                onCurChange={(idx,v)=>setIn(idx,'cur',v)}
-                onRemove={i>0?rmIn:null}
-                colorScheme="in"
-              />
-            ))}
-            <button onClick={()=>setS(x=>({...x,ins:[...x.ins,mkCreditTo()]}))} style={{background:'none',border:'1px dashed #86efac',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.green,width:'100%'}}>
-              + Agregar contraparte destino
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── SALIDAS / ENTRADAS (standard modes) ── */}
-      {mode!=='credit_transfer'&&<>
+      {/* ── MIS CUENTAS: SALE ── */}
       <div style={{background:'#fff5f5',border:'1px solid #fecaca',borderRadius:10,padding:'10px 12px'}}>
-        <div style={{fontSize:11,fontWeight:600,color:T.red,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
-          📤 Sale / se descuenta
+        <div style={{fontSize:11,fontWeight:600,color:T.red,marginBottom:6,
+          textTransform:'uppercase',letterSpacing:'0.04em'}}>
+          📤 Sale de mis cuentas
         </div>
         {s.outs.map((leg,idx)=>(
-          leg.kind==='debt_deduct'
-            ? <CreditDeductRow
-                key={leg.id} leg={leg} idx={idx}
-                clients={clients} credits={credits}
-                onClientChange={(i,v)=>setOut(i,'clientId',v)}
-                onAmtChange={(i,v)=>setOut(i,'amt',v)}
-                onCurChange={(i,v)=>setOut(i,'cur',v)}
-                onRemove={rmOut}
-              />
-            : <AccRow
-                key={leg.id} leg={leg} idx={idx} side="out"
-                accounts={accounts}
-                onAccChange={(i,v)=>setOut(i,'accId',v)}
-                onAmtChange={(i,v)=>setOut(i,'amt',v)}
-                onRemove={idx>0?rmOut:null}
-              />
+          <AccLegRow key={leg.id} leg={leg} idx={idx} side="out" accounts={accounts}
+            onAccChange={(i,v)=>setOut(i,'accId',v)}
+            onAmtChange={(i,v)=>setOut(i,'amt',v)}
+            onRemove={rmOut}
+          />
         ))}
-        <div style={{display:'flex',gap:6,marginTop:2}}>
-          <button onClick={addOut} style={{flex:1,background:'none',border:'1px dashed '+T.red,borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.red}}>
-            + Cuenta
-          </button>
-          {mode!=='transfer'&&(
-            <button onClick={addInDebt} style={{flex:1,background:'none',border:'1px dashed #b45309',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:'#b45309'}}>
-              + Descuento de deuda
-            </button>
-          )}
-        </div>
+        <button onClick={addOut}
+          style={{background:'none',border:'1px dashed '+T.red,borderRadius:6,
+            padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.red,width:'100%',marginTop:2}}>
+          + Agregar cuenta de salida
+        </button>
       </div>
 
-      {/* ── ENTRADAS ── */}
+      {/* ── MIS CUENTAS: ENTRA ── */}
       <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:10,padding:'10px 12px'}}>
-        <div style={{fontSize:11,fontWeight:600,color:T.green,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.04em'}}>
-          📥 Entra a tus cuentas
+        <div style={{fontSize:11,fontWeight:600,color:T.green,marginBottom:6,
+          textTransform:'uppercase',letterSpacing:'0.04em'}}>
+          📥 Entra a mis cuentas
         </div>
         {s.ins.map((leg,idx)=>(
-          leg.kind==='account'
-            ? <AccRow
-                key={leg.id} leg={leg} idx={idx} side="in"
-                accounts={accounts}
-                onAccChange={(i,v)=>setIn(i,'accId',v)}
-                onAmtChange={(i,v)=>setIn(i,'amt',v)}
-                onRemove={idx>0?rmIn:null}
-              />
-            : <CredRow
-                key={leg.id} leg={leg} idx={idx}
-                onAmtChange={(i,v)=>setIn(i,'amt',v)}
-                onCurChange={(i,v)=>setIn(i,'cur',v)}
-                onRemove={rmIn}
-              />
+          <AccLegRow key={leg.id} leg={leg} idx={idx} side="in" accounts={accounts}
+            onAccChange={(i,v)=>setIn(i,'accId',v)}
+            onAmtChange={(i,v)=>setIn(i,'amt',v)}
+            onRemove={rmIn}
+          />
         ))}
-        <div style={{display:'flex',gap:6,marginTop:2}}>
-          <button onClick={addIn} style={{flex:1,background:'none',border:'1px dashed '+T.green,borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.green}}>
-            + Cuenta interna
-          </button>
-          {mode!=='transfer'&&(
-            <button onClick={addInCred} style={{flex:1,background:'none',border:'1px dashed #b45309',borderRadius:6,padding:'4px 10px',cursor:'pointer',fontSize:12,color:'#b45309'}}>
-              + Crédito / deuda
-            </button>
-          )}
-        </div>
+        <button onClick={addIn}
+          style={{background:'none',border:'1px dashed '+T.green,borderRadius:6,
+            padding:'4px 10px',cursor:'pointer',fontSize:12,color:T.green,width:'100%',marginTop:2}}>
+          + Agregar cuenta de entrada
+        </button>
       </div>
-      </> /* end mode!=='credit_transfer' */}
 
-      {/* Totals summary */}
-      {mode!=='credit_transfer'&&(totalOutUSD>0||totalInUSD>0)&&(
-        <div style={{background:T.bgApp,border:'1px solid '+T.border,borderRadius:8,padding:'10px 12px'}}>
+      {/* ── POSICIONES CON CONTRAPARTES ── */}
+      <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:10,padding:'10px 12px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <div style={{fontSize:11,fontWeight:600,color:'#b45309',
+            textTransform:'uppercase',letterSpacing:'0.04em'}}>
+            💳 Posiciones con contrapartes
+          </div>
+          <div style={{fontSize:10,color:T.textMuted}}>(opcional — solo si quedó algo pendiente)</div>
+        </div>
+        {s.pos.length===0&&(
+          <div style={{fontSize:12,color:T.textMuted,paddingBottom:6}}>
+            Sin posiciones pendientes — el pago fue completo
+          </div>
+        )}
+        {s.pos.map((leg,idx)=>(
+          <PosLegRow key={leg.id} leg={leg} idx={idx}
+            clients={clients} credits={credits}
+            onClientChange={(i,v)=>setPos(i,'clientId',v)}
+            onAmtChange={(i,v)=>setPos(i,'amt',v)}
+            onCurChange={(i,v)=>setPos(i,'cur',v)}
+            onSignChange={(i,v)=>setPos(i,'sign',v)}
+            onRemove={rmPos}
+          />
+        ))}
+        <button onClick={addPos}
+          style={{background:'none',border:'1px dashed #b45309',borderRadius:6,
+            padding:'4px 10px',cursor:'pointer',fontSize:12,color:'#b45309',width:'100%',marginTop:2}}>
+          + Agregar posición pendiente
+        </button>
+      </div>
+
+      {/* ── Summary ── */}
+      {(totalOutUSD>0||totalInUSD>0)&&(
+        <div style={{background:T.bgApp,border:'1px solid '+T.border,borderRadius:8,padding:'10px 14px'}}>
           <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-            <span style={{fontSize:12,color:T.textSub}}>Total salida (USD equiv.)</span>
+            <span style={{fontSize:12,color:T.textSub}}>Total salida (≈USD)</span>
             <span style={{fontSize:13,fontWeight:600,color:T.red}}>{fmt(totalOutUSD,'USD')}</span>
           </div>
           <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-            <span style={{fontSize:12,color:T.textSub}}>Total entrada (USD equiv.)</span>
+            <span style={{fontSize:12,color:T.textSub}}>Total entrada (≈USD)</span>
             <span style={{fontSize:13,fontWeight:600,color:T.green}}>{fmt(totalInUSD,'USD')}</span>
           </div>
-          {autoProfit!==null&&<>
-            <div style={{borderTop:'1px solid '+T.border,marginTop:6,paddingTop:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          {autoProfit!==null&&(
+            <div style={{borderTop:'1px solid '+T.border,marginTop:6,paddingTop:6,
+              display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <span style={{fontSize:12,fontWeight:600,color:T.textSub}}>Profit / Loss</span>
-              <span style={{fontSize:16,fontWeight:700,color:autoProfit>=0?T.green:T.red}}>{(autoProfit>=0?'+':'')+fmt(autoProfit,'USD')}</span>
+              <span style={{fontSize:16,fontWeight:700,
+                color:autoProfit>=0?T.green:T.red}}>
+                {(autoProfit>=0?'+':'')+fmt(autoProfit,'USD')}
+              </span>
             </div>
-          </>}
+          )}
+          {autoRate&&(
+            <div style={{display:'flex',justifyContent:'space-between',marginTop:4}}>
+              <span style={{fontSize:11,color:T.textMuted}}>Cotización calculada</span>
+              <span style={{fontSize:12,fontWeight:600,color:T.blue}}>{autoRate.toLocaleString('es-PY')}</span>
+            </div>
+          )}
         </div>
       )}
 
-      <Inp label="Cotización de referencia (opcional)" type="number" placeholder="ej: 6200" value={s.rate} onChange={e=>set('rate',e.target.value)}/>
-      <Inp label="Detalle / Comentario" placeholder="Descripción de la operación" value={s.detail} onChange={e=>set('detail',e.target.value)}/>
+      <Inp label="Cotización manual (si difiere del cálculo)" type="number"
+        placeholder="ej: 6200" value={s.rate} onChange={e=>set('rate',e.target.value)}/>
+      <Inp label="Detalle / Comentario" placeholder="Descripción de la operación"
+        value={s.detail} onChange={e=>set('detail',e.target.value)}/>
 
-      {/* Attachment upload */}
+      {/* Attachments */}
       <Fld label="Comprobantes (opcional)">
         <div style={{border:'1px dashed '+T.border,borderRadius:8,padding:'10px 12px',background:T.bgApp}}>
-          <input
-            type="file" multiple accept="image/*,.pdf,.jpg,.jpeg,.png,.webp"
+          <input type="file" multiple accept="image/*,.pdf"
             onChange={e=>set('files',Array.from(e.target.files))}
-            style={{fontSize:12,color:T.textSub,width:'100%'}}
-          />
+            style={{fontSize:12,color:T.textSub,width:'100%'}}/>
           {s.files&&s.files.length>0&&(
             <div style={{marginTop:6,display:'flex',flexWrap:'wrap',gap:4}}>
               {s.files.map((f,i)=>(
-                <Tag key={i} bg={T.blueBg} color={T.blue} size="sm">📎 {f.name.slice(0,20)}{f.name.length>20?'…':''}</Tag>
+                <Tag key={i} bg={T.blueBg} color={T.blue} size="sm">
+                  📎 {f.name.slice(0,20)}{f.name.length>20?'…':''}
+                </Tag>
               ))}
             </div>
           )}
-          {/* Show existing attachments when editing */}
           {editOp?.attachments?.length>0&&(
             <div style={{marginTop:6}}>
               <div style={{fontSize:11,color:T.textMuted,marginBottom:4}}>Archivos existentes:</div>
@@ -748,7 +662,9 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
         </div>
       </Fld>
 
-      <div style={{fontSize:10,color:T.textMuted,textAlign:'center'}}>Ref: 1 USDT=$1 · 1 EUR=$1.08 · ₲6200=$1 · R$5.1=$1</div>
+      <div style={{fontSize:10,color:T.textMuted,textAlign:'center'}}>
+        Ref: 1 USDT=$1 · 1 EUR=$1.08 · ₲6,200=$1 · R$5.1=$1
+      </div>
       <div style={{display:'flex',gap:8,justifyContent:'flex-end',paddingTop:4}}>
         <Btn onClick={onClose}>Cancelar</Btn>
         <Btn primary onClick={submit}>{editOp?'Guardar cambios':'Registrar'}</Btn>
@@ -756,6 +672,7 @@ function OpForm({accounts,clients,credits,onSubmit,onClose,onCreateClient,editOp
     </div>
   )
 }
+
 
 // ── Account Detail ────────────────────────────────────────────────────────────
 function AccDetail({acc,ops,onUpdateAcc}){
@@ -889,7 +806,7 @@ function Dashboard({accounts,clients,ops,credits,setTab}){
   const credSumm=useMemo(()=>{const r=[];clients.forEach(c=>{const b=cliCreds(c.id,credits);const d=Object.entries(b).filter(([,v])=>v>0);if(d.length>0)r.push({c,debts:d,type:'credit'})});return r},[clients,credits])
   const debtSumm=useMemo(()=>{const r=[];clients.forEach(c=>{const b=cliCreds(c.id,credits);const d=Object.entries(b).filter(([,v])=>v<0);if(d.length>0)r.push({c,debts:d,type:'debt'})});return r},[clients,credits])
   const accSumm=useMemo(()=>accSumByType(accounts),[accounts])
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.',credit_transfer:'Traspaso'}
+  const modeLab={exchange:'Cambio',transfer:'Transfer.',credit_transfer:'Traspaso',other:'Otro',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda'}
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
@@ -1039,8 +956,8 @@ function Operaciones({accounts,clients,credits,ops,onAddOp,onEditOp,onDeleteOp,o
   const visible=ops.filter(o=>!o.isReversal)
   const filtered=useMemo(()=>[...visible].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).filter(o=>!q||[o.detail,o.clientName].some(s=>(s||'').toLowerCase().includes(q.toLowerCase()))),[visible,q])
   const pages=Math.ceil(filtered.length/PER)||1,paged=filtered.slice((page-1)*PER,page*PER)
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.',credit_transfer:'Traspaso'}
-  const modeBg={exchange:'#e0f2fe',credit_out:'#fef9c3',credit_in:'#dcfce7',debt_in:'#fdf2f8',debt_pay:'#fff1f2',transfer:'#f5f3ff',credit_transfer:'#f0f7ff'}
+  const modeLab={exchange:'Cambio',transfer:'Transfer.',credit_transfer:'Traspaso',other:'Otro',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda'}
+  const modeBg={exchange:'#e0f2fe',transfer:'#f5f3ff',credit_transfer:'#f0f7ff',other:'#f8f8f4',credit_out:'#fef9c3',credit_in:'#dcfce7',debt_in:'#fdf2f8',debt_pay:'#fff1f2'}
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
@@ -1160,7 +1077,7 @@ function ClienteDetalle({client,ops,accounts,credits}){
   const openDt=Object.entries(creds).filter(([,v])=>v<0)
   const inRange=cOps.filter(o=>o.createdAt.slice(0,10)>=df&&o.createdAt.slice(0,10)<=dt)
   const totalP=cOps.reduce((s,o)=>s+(o.profit||0),0)
-  const modeLab={exchange:'Cambio',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda',transfer:'Transfer.',credit_transfer:'Traspaso'}
+  const modeLab={exchange:'Cambio',transfer:'Transfer.',credit_transfer:'Traspaso',other:'Otro',credit_out:'Crédito dado',credit_in:'Cobro',debt_in:'Deuda tomada',debt_pay:'Pago deuda'}
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:10}}>
